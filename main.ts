@@ -3,6 +3,7 @@ import { Wallet } from './components/Wallet';
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
  
 
 class MainApp {
@@ -33,15 +34,27 @@ class MainApp {
         return this.wallets;
     }
 
-    // Method to show private keys of all wallets (for demonstration purposes)
-    public showWalletPrivateKeys(): void {
-        this.wallets.forEach((wallet, index) => {
-            console.log(chalk.green(`#${index + 1}. ${wallet.getPrivateKey()}`));
-        });
+    public async getAllBalance() {
+        for (const wallet of app.getWallets()) {
+            console.log(chalk.green(`public key: ${wallet.getPublicKey()}`));
+            try {
+                let balance: any = await wallet.getBalance();
+                balance = Number.parseFloat(balance) / LAMPORTS_PER_SOL;
+                console.log(chalk.green(`balance: ${balance} SOL`))
+                
+            } catch (err: any) {
+                console.log(chalk.red(`error: ${err.message}`))
+            }
+        }
     }
+
 }
 
 // Example usage
 const app = new MainApp();
+
+
 app.createWalletsFromFile('wallets.txt');
-app.showWalletPrivateKeys();
+app.getAllBalance()
+// app.getWallets()[0].buy('H8EZLMCZnY5ZmtHPLUCDFuHmQW1eg2hqYM8QzgWbpump', 0.015, 0.25, 0.0001);
+app.getWallets()[0].sell('H8EZLMCZnY5ZmtHPLUCDFuHmQW1eg2hqYM8QzgWbpump', 10**3, 0.25, 0.0001);
