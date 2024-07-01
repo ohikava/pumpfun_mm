@@ -16,10 +16,13 @@ import {
 export class Token {
     public mint: PublicKey;
     private connection: Connection
-
+    public decimals: Number;
+    public tokenMeta: Object | undefined;
     constructor(mint: string, connection: Connection) {
         this.mint = new PublicKey(mint)
         this.connection = connection;
+        this.decimals = 6;
+        this.getDecimals()
     }
 
 
@@ -41,6 +44,7 @@ export class Token {
             "headers": headers
         });
         const r_body = await r.json();
+        this.tokenMeta = r_body;
         return r_body;
     }
     public calculateTokenOut (solIn: number, coinData: any) {
@@ -52,6 +56,14 @@ export class Token {
         return tokenOut;
     }
 
+    public async calculateTokenPrice() {
+        if (typeof this.tokenMeta) {
+            this.tokenMeta = await this.getTokenMeta()
+        }
+        const coinData = this.tokenMeta;
+
+        return coinData['virtual_sol_reserves'] / coinData['virtual_token_reserves'];
+    }
     public async checkIfTokenAccountExist(
         wallet: Keypair,
     ): Promise<[Boolean, PublicKey]> {
@@ -82,6 +94,17 @@ export class Token {
         );
 
         return transaction;
+    }
+
+    public async getAccountInfo() {
+        const accountInfo = await this.connection.getParsedAccountInfo(this.mint);
+        return accountInfo.value?.data.parsed.info
+    }
+
+    public async getDecimals() {
+        const tokenInfo = await this.getAccountInfo();
+        // console.log(this.decimals)
+        this.decimals = tokenInfo.decimals;
     }
     
 };

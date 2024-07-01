@@ -28,13 +28,13 @@ export class Wallet {
     private keypair: Keypair;
     private connection:  Connection;
     private token: Token 
-    private computeBudget: ComputeBudgetProgram;
+    private tokenAccountAddress: PublicKey | undefined;
 
     constructor(privateKey: string, token: Token, connection: Connection) {
         this.keypair = this.load_key_pair(privateKey);
         this.connection = connection;
         this.token = token; 
-        this.computeBudget = new ComputeBudgetProgram();
+        this.tokenAccountAddress = undefined;
     }
 
     public async buy(solIn: number, slippageDecimal: number) {
@@ -54,13 +54,13 @@ export class Wallet {
                 const ata = this.token.getCreateTokenAccountInstruction(this.keypair, tokenAccount);
                 tokenAccountInstructions.push(...ata.instructions);
             }
-            
+            this.tokenAccountAddress = tokenAccount;
+
             const tokenOut = this.token.calculateTokenOut(solIn, coinData);
             const solInWithSlippage = solIn * (1 + slippageDecimal);
             const maxSolCost = Math.floor(solInWithSlippage * LAMPORTS_PER_SOL);
 
             const MINT = this.token.mint;
-            coinData.js
             const BONDING_CURVE = new PublicKey(coinData.bonding_curve);
             const ASSOCIATED_BONDING_CURVE = new PublicKey(coinData.associated_bonding_curve);
             const ASSOCIATED_USER = tokenAccount;
@@ -111,7 +111,8 @@ export class Wallet {
             transaction.sign([this.keypair]);
             const txId = await this.connection.sendTransaction(transaction);
 
-            logger.info(`https://solscan.io/tx/${txId}`);
+            logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} BUY ${solIn} SOL. tx: ${txId}`);
+            return true;
 
             } catch (e: unknown) {
                 if (typeof e === "string") {
@@ -119,6 +120,7 @@ export class Wallet {
                 } else if (e instanceof Error) {
                     logger.error(e.message)// works, `e` narrowed to Error
                 }
+                return false;
             }
     }
 
@@ -132,9 +134,17 @@ export class Wallet {
             }
 
             let tokenAccountInstructions: TransactionInstruction[] = [];
+            let tokenAccount: PublicKey;
+            let isTokenAccountExist: Boolean;
+            if (!this.tokenAccountAddress) {
+                [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair);
+            } else {
+                tokenAccount = this.tokenAccountAddress;
+            }
+            
+            tokenOut *= 10**this.token.decimals;
+            tokenOut = Math.floor(tokenOut);
 
-            const [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair)
-            tokenOut *= 10**6
             const minSolOutput = Math.floor(tokenOut * (1 - slippageDecimal) * coinData['virtual_sol_reserves'] / coinData['virtual_token_reserves'])
 
             const MINT = this.token.mint;
@@ -188,7 +198,8 @@ export class Wallet {
             transaction.sign([this.keypair]);
             const txId = await this.connection.sendTransaction(transaction);
 
-            logger.info(`https://solscan.io/tx/${txId}`);
+            logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${tokenOut} tokens. tx: ${txId}`);
+            return true;
 
             } catch (e: unknown) {
                 if (typeof e === "string") {
@@ -196,11 +207,26 @@ export class Wallet {
                 } else if (e instanceof Error) {
                     logger.error(e.message)// works, `e` narrowed to Error
                 }
+                return false; 
             }
     }
 
     public generateKeyPair(): Keypair {
         return Keypair.generate();
+    }
+
+    public async getTokenAccountInfo() {
+        var _: Boolean;
+        if (!this.tokenAccountAddress) {
+            [_, this.tokenAccountAddress] = await this.token.checkIfTokenAccountExist(this.keypair);
+        }
+        const accountInfo = await this.connection.getParsedAccountInfo(this.tokenAccountAddress);
+        return accountInfo;
+    }
+
+    public async getTokenAmount() {
+        const tokenAccountInfo = await this.getTokenAccountInfo();
+        return tokenAccountInfo.value?.data.parsed.info.tokenAmount.amount / 10 ** this.token.decimals;
     }
 
     private load_key_pair(privateKey: string): Keypair {
@@ -211,7 +237,7 @@ export class Wallet {
         return this.keypair.publicKey.toString();
     }
 
-    public async getBalance(): Promise<number> {
+    public async getSolBalance(): Promise<number> {
         const balance = await this.connection.getBalance(this.keypair.publicKey);
         return balance;
     }

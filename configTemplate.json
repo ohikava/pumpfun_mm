@@ -1,0 +1,9 @@
+{
+    "minBuyAmountSol": 0.01,
+    "maxBuyAmountSol": 0.05,
+    "minSleepTime": 3,
+    "maxSleepTime": 10,
+    "slippage": 0.1,
+    "RPC": "",
+    "CA": ""
+}

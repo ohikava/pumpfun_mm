@@ -11,6 +11,4 @@ export const SOL = "So11111111111111111111111111111111111111112";
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const UNIT_PRICE =  1_000_000;
 export const UNIT_BUDGET =  80_000;
-export const SOLANA_RPC = "https://api.mainnet-beta.solana.com/";
 export const PUMP_FUN_ADDRESS = "https://api.pumpdata.fun";
-

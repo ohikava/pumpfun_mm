@@ -1,27 +1,28 @@
 // MainApp.ts
 import { Wallet } from './components/Wallet';
+import {getRandomDecimalInRange, round} from "./components/utils";
 import * as fs from 'fs';
 import * as path from 'path';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import {Token} from "./components/Token";
-import { SOLANA_RPC } from './components/constants';
 import * as logger from "./components/logger";
+import config from "./config.json" with {"type": "json"};
+import * as readline from 'readline';
 
 logger.setLevel("INFO");
 
 class MainApp {
     private wallets: Wallet[];
-    private mint: Token;
+    public mint: Token;
     private connection: Connection
 
 
     constructor() {
         this.wallets = [];
-        this.connection = new Connection(SOLANA_RPC)
+        this.connection = new Connection(config.RPC)
         logger.debug('application has started...');
 
-        const mint_contract = "H8EZLMCZnY5ZmtHPLUCDFuHmQW1eg2hqYM8QzgWbpump";
-        this.mint = new Token(mint_contract, this.connection);
+        this.mint = new Token(config.CA, this.connection);
 
 
     }
@@ -48,9 +49,10 @@ class MainApp {
 
     public async getAllBalance() {
         for (const wallet of app.getWallets()) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
             logger.info(`public key: ${wallet.getPublicKey()}`);
             try {
-                let balance: any = await wallet.getBalance();
+                let balance: any = await wallet.getSolBalance();
                 balance = Number.parseFloat(balance) / LAMPORTS_PER_SOL;
                 logger.info(`balance: ${balance} SOL`);
                 
@@ -60,11 +62,89 @@ class MainApp {
         }
     }
 
+    public async buyFromList(walletsList: Wallet[]): Promise<Number[]> {
+        let successCount = 0;
+        let totalSum = 0;
+        const successBuyList: Number[] = [];
+
+        for (let i = 0; i < walletsList.length; i++) {
+            
+            const currentWallet = walletsList[i];
+            var randomSum = getRandomDecimalInRange(config.minBuyAmountSol, config.maxBuyAmountSol);
+            randomSum = round(randomSum, 3);
+            const isSuccess = await currentWallet.buy(randomSum, config.slippage);
+            
+            if (isSuccess) {
+                successCount += 1;
+                totalSum += randomSum;
+                successBuyList.push(i);
+            }
+
+            const randomWaitTime = getRandomDecimalInRange(config.minSleepTime, config.maxSleepTime) * 1000;
+            if (!(i == walletsList.length - 1)) {
+                await new Promise(resolve => setTimeout(resolve, randomWaitTime));
+            }
+        }
+
+        logger.info(`BUY success rate: ${successCount / walletsList.length}, total sum: ${totalSum}`);
+        return successBuyList;
+    }
+
+    public async buyFromAll() {
+        await this.buyFromList(this.wallets);
+    }
+
+    public async sellFromList(walletsList: Wallet[]): Promise<Number[]> {
+        let successCount = 0;
+        let totalSum = 0;
+        let successSellList: Number[] = [];
+
+        for (let i = 0; i < walletsList.length; i++) {
+            const currentWallet = walletsList[i];
+            const balance = await currentWallet.getTokenAmount();
+            const isSuccess = await currentWallet.sell(balance-2, config.slippage);
+            
+            if (isSuccess) {
+                successCount += 1;
+                totalSum += balance;
+                successSellList.push(i);;
+            }
+        }
+        const tokenPrice = await this.mint.calculateTokenPrice();
+        logger.info(`SELL success rate: ${successCount / walletsList.length}, total sum: ${round(totalSum * tokenPrice, this.mint.decimals)}`);
+        return successSellList;
+    }
+
+    public async sellFromAll() {
+        await this.sellFromList(this.wallets);
+    }
+
+
 }
 
-// Example usage
-const app = new MainApp();
+const app = new MainApp()
 app.createWalletsFromFile('wallets.txt');
-app.getAllBalance();
-// app.getWallets()[0].buy(0.05, 0.1);
-// app.getWallets()[0].sell(1700000, 0.1);
+
+setTimeout(() => {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    
+    rl.question('please select an option: [1] buy all or [2] sell all\n', (answer) => {
+    let choice;
+
+    switch (parseInt(answer)) {
+        case 1:
+            app.buyFromAll()
+            break;
+        case 2:
+            app.sellFromAll()
+            break;
+        default:
+            console.log("invalid selection. Please try again.");
+            return rl.close();
+    }
+    rl.close();
+});
+  }, 3 * 1000);
