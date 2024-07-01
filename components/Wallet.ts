@@ -1,100 +1,207 @@
 import bs58 from 'bs58'
-import chalk from 'chalk';
+import {Keypair, 
+        VersionedTransaction, 
+        TransactionInstruction, 
+        Connection, 
+        LAMPORTS_PER_SOL, 
+        PublicKey, 
+        ComputeBudgetProgram,
+        TransactionMessage} from "@solana/web3.js";
+import {GLOBAL, 
+        FEE_RECIPIENT, 
+        SYSTEM_PROGRAM, 
+        TOKEN_PROGRAM, 
+        RENT, 
+        EVENT_AUTHORITY, 
+        PUMP_FUN_PROGRAM, 
+        UNIT_BUDGET,
+        UNIT_PRICE
+    } from "./constants";
 
-const {Keypair, VersionedTransaction, Transaction, sendAndConfirmTransaction, Connection, clusterApiUrl, SystemProgram, LAMPORTS_PER_SOL, PublicKey} = require("@solana/web3.js")
+import {bufferFromUInt64} from "./utils"
 
-const SOLANA_RPC = "https://api.mainnet-beta.solana.com/";
-const PUMP_FUN_ADDRESS = "https://api.pumpdata.fun";
-
+import { Token } from './Token';
+import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 export class Wallet {
-    private keypair: typeof Keypair;
-    private connection: typeof Connection;
+    private keypair: Keypair;
+    private connection:  Connection;
+    private token: Token 
+    private computeBudget: ComputeBudgetProgram;
 
-
-    constructor(privateKey: string) {
+    constructor(privateKey: string, token: Token, connection: Connection) {
         this.keypair = this.load_key_pair(privateKey);
-        this.connection = new Connection(SOLANA_RPC)
+        this.connection = connection;
+        this.token = token; 
+        this.computeBudget = new ComputeBudgetProgram();
     }
 
-    public async buy(token_address:string, amount:number, slippage=0.25, priorityFee=0.0001) {
-        const response = await fetch(`${PUMP_FUN_ADDRESS}/buy`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "mint": token_address,                // the token address from pump.fun
-                "buyerPublicKey": this.getPublicKey(),    // Your wallet public key
-                "amountInSol": amount,                               // amount of SOL, (0.1 SOL)
-                "slippagePercent": slippage * 100,                            // percent slippage allowed (25%)
-                "priorityFee": priorityFee,                            // priority fee (0.0001 SOl)
-            })
-        });
-        if(response.status === 200) {
-            const data = await response.arrayBuffer();
-            const tx = VersionedTransaction.deserialize(new Uint8Array(data));
-            // console.log(tx);
-            // console.log(Object.keys(tx));
-            // console.log(tx.message.recentBlockhash);
-            // console.log(tx.message.recentBlockhash);
-            let blockhash = await this.connection.getRecentBlockhash('finalized');
-            blockhash = blockhash.blockhash;
-            tx.message.recentBlockhash = blockhash
-            tx.sign([this.keypair]);
-            try {
-                const signature = await this.connection.sendTransaction(tx)
-                console.log(chalk.green("Transaction: https://solscan.io/tx/" + signature));
-            } catch (error:any) {
-                console.log(chalk.red(error.message));
+    public async buy(solIn: number, slippageDecimal: number) {
+        try {
+            const coinData = await this.token.getTokenMeta()
 
+            if (!coinData) {
+                console.log("Failed to retrieve coin data...");
+                return;
             }
-        
-        } else {
-            console.log(response.statusText);
-        }
-    }
 
-    // Empty method for selling assets
-    public async sell(token_address:string, amount:number, slippage=0.25, priorityFee=0.0001) {
-        const response = await fetch(`${PUMP_FUN_ADDRESS}/sell`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                "mint": token_address,                // the token address from pump.fun
-                "sellerPublicKey": this.getPublicKey(),    // Your wallet public key
-                "tokens": amount,                               // amount of tokens, (35733.3 Doge tokens)
-                "slippagePercent": slippage * 100,                            // percent slippage allowed (25%)
-                "priorityFee": priorityFee,                            // priority fee (0.0001 SOl)
-            })
-        });
-        if(response.status === 200) {
-            const data = await response.arrayBuffer();
-            const tx = VersionedTransaction.deserialize(new Uint8Array(data));
-            let blockhash = await this.connection.getRecentBlockhash('finalized');
-            blockhash = blockhash.blockhash;
-            tx.message.recentBlockhash = blockhash
-            tx.sign([this.keypair]);
-            try {
-                const signature = await this.connection.sendTransaction(tx)
-                console.log(chalk.green("Transaction: https://solscan.io/tx/" + signature));
-            } catch (error:any) {
-                console.log(chalk.red(error.message));
+            let tokenAccountInstructions: TransactionInstruction[] = [];
 
+            const [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair)
+
+            if (!isTokenAccountExist) {
+                const ata = this.token.getCreateTokenAccountInstruction(this.keypair, tokenAccount);
+                tokenAccountInstructions.push(...ata.instructions);
             }
-        
-        } else {
-            console.log(response.statusText);
-            console.log(response)
-        }
+            
+            const tokenOut = this.token.calculateTokenOut(solIn, coinData);
+            const solInWithSlippage = solIn * (1 + slippageDecimal);
+            const maxSolCost = Math.floor(solInWithSlippage * LAMPORTS_PER_SOL);
+
+            const MINT = this.token.mint;
+            coinData.js
+            const BONDING_CURVE = new PublicKey(coinData.bonding_curve);
+            const ASSOCIATED_BONDING_CURVE = new PublicKey(coinData.associated_bonding_curve);
+            const ASSOCIATED_USER = tokenAccount;
+            const USER = this.keypair.publicKey;
+            
+            const keys = [
+                { pubkey: GLOBAL, isSigner: false, isWritable: false },
+                { pubkey: FEE_RECIPIENT, isSigner: false, isWritable: true },
+                { pubkey: MINT, isSigner: false, isWritable: false },
+                { pubkey: BONDING_CURVE, isSigner: false, isWritable: true },
+                { pubkey: ASSOCIATED_BONDING_CURVE, isSigner: false, isWritable: true },
+                { pubkey: ASSOCIATED_USER, isSigner: false, isWritable: true },
+                { pubkey: USER, isSigner: true, isWritable: true },
+                { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
+                { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
+                { pubkey: RENT, isSigner: false, isWritable: false },
+                { pubkey: EVENT_AUTHORITY, isSigner: false, isWritable: false },
+                { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false }
+              ];
+            
+            const data = Buffer.concat([bufferFromUInt64('16927863322537952870'), bufferFromUInt64(tokenOut), bufferFromUInt64(maxSolCost)]);
+
+
+
+            const swapInstruction = new TransactionInstruction({
+                "keys": keys,
+                "programId": PUMP_FUN_PROGRAM,
+                "data": data,
+            });
+
+            const budgetUsageInstructions = [
+                ComputeBudgetProgram.setComputeUnitPrice({"microLamports": UNIT_PRICE}),
+                ComputeBudgetProgram.setComputeUnitLimit({"units": UNIT_BUDGET})
+            ]
+            const instructions = [
+                ...budgetUsageInstructions,
+                ...tokenAccountInstructions,
+                 swapInstruction,
+            ];
+            
+            const compiledMessage = new TransactionMessage({
+                "instructions": instructions,
+                "payerKey": this.keypair.publicKey,
+                "recentBlockhash": (await this.connection.getLatestBlockhash()).blockhash
+            }).compileToV0Message();
+
+            const transaction = new VersionedTransaction(compiledMessage);
+            transaction.sign([this.keypair]);
+            const txId = await this.connection.sendTransaction(transaction);
+
+            console.log(`https://solscan.io/tx/${txId}`);
+
+            } catch (e: unknown) {
+                if (typeof e === "string") {
+                   console.log(e.toUpperCase())// works, `e` narrowed to string
+                } else if (e instanceof Error) {
+                    console.log(e.message)// works, `e` narrowed to Error
+                }
+            }
     }
 
-    public generateKeyPair(): typeof Keypair {
+    public async sell(tokenOut: number, slippageDecimal: number) {
+        try {
+            const coinData = await this.token.getTokenMeta()
+
+            if (!coinData) {
+                console.log("Failed to retrieve coin data...");
+                return;
+            }
+
+            let tokenAccountInstructions: TransactionInstruction[] = [];
+
+            const [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair)
+            tokenOut *= 10**6
+            const minSolOutput = Math.floor(tokenOut * (1 - slippageDecimal) * coinData['virtual_sol_reserves'] / coinData['virtual_token_reserves'])
+
+            const MINT = this.token.mint;
+            const BONDING_CURVE = new PublicKey(coinData.bonding_curve);
+            const ASSOCIATED_BONDING_CURVE = new PublicKey(coinData.associated_bonding_curve);
+            const ASSOCIATED_USER = tokenAccount;
+            const USER = this.keypair.publicKey;
+            
+            const keys = [
+                { pubkey: GLOBAL, isSigner: false, isWritable: false },
+                { pubkey: FEE_RECIPIENT, isSigner: false, isWritable: true },
+                { pubkey: MINT, isSigner: false, isWritable: false },
+                { pubkey: BONDING_CURVE, isSigner: false, isWritable: true },
+                { pubkey: ASSOCIATED_BONDING_CURVE, isSigner: false, isWritable: true },
+                { pubkey: ASSOCIATED_USER, isSigner: false, isWritable: true },
+                { pubkey: USER, isSigner: true, isWritable: true },
+                { pubkey: SYSTEM_PROGRAM, isSigner: false, isWritable: false },
+                { pubkey: ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false},
+                { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
+                { pubkey: EVENT_AUTHORITY, isSigner: false, isWritable: false },
+                { pubkey: PUMP_FUN_PROGRAM, isSigner: false, isWritable: false }
+              ];
+            
+            const data = Buffer.concat([bufferFromUInt64('12502976635542562355'), bufferFromUInt64(tokenOut), bufferFromUInt64(minSolOutput)]);
+
+
+
+            const swapInstruction = new TransactionInstruction({
+                "keys": keys,
+                "programId": PUMP_FUN_PROGRAM,
+                "data": data,
+            });
+
+            const budgetUsageInstructions = [
+                ComputeBudgetProgram.setComputeUnitPrice({"microLamports": UNIT_PRICE}),
+                ComputeBudgetProgram.setComputeUnitLimit({"units": UNIT_BUDGET})
+            ]
+            const instructions = [
+                ...budgetUsageInstructions,
+                ...tokenAccountInstructions,
+                 swapInstruction,
+            ];
+            
+            const compiledMessage = new TransactionMessage({
+                "instructions": instructions,
+                "payerKey": this.keypair.publicKey,
+                "recentBlockhash": (await this.connection.getLatestBlockhash()).blockhash
+            }).compileToV0Message();
+
+            const transaction = new VersionedTransaction(compiledMessage);
+            transaction.sign([this.keypair]);
+            const txId = await this.connection.sendTransaction(transaction);
+
+            console.log(`https://solscan.io/tx/${txId}`);
+
+            } catch (e: unknown) {
+                if (typeof e === "string") {
+                   console.log(e.toUpperCase())// works, `e` narrowed to string
+                } else if (e instanceof Error) {
+                    console.log(e.message)// works, `e` narrowed to Error
+                }
+            }
+    }
+
+    public generateKeyPair(): Keypair {
         return Keypair.generate();
     }
 
-    private load_key_pair(privateKey: string): typeof Keypair {
+    private load_key_pair(privateKey: string): Keypair {
         return Keypair.fromSecretKey(bs58.decode(privateKey));
     }
 
@@ -102,21 +209,7 @@ export class Wallet {
         return this.keypair.publicKey.toString();
     }
 
-    public transaction(to: string, amount: number): typeof Transaction {
-        return new Transaction().add(
-            SystemProgram.transfer({
-                fromPubkey: this.keypair.publicKey,
-                toPubkey: new PublicKey(to),
-                lamports: amount * LAMPORTS_PER_SOL,
-            })
-        );
-    }
-
-    public signAndSendTransaction(transaction: typeof Transaction): void {
-        sendAndConfirmTransaction(this.connection, transaction, [this.keypair]);
-    }
-
-    public async getBalance(): Promise<string> {
+    public async getBalance(): Promise<number> {
         const balance = await this.connection.getBalance(this.keypair.publicKey);
         return balance;
     }
