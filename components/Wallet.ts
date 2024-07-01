@@ -22,6 +22,8 @@ import {bufferFromUInt64} from "./utils"
 
 import { Token } from './Token';
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import * as logger from "./logger";
+
 export class Wallet {
     private keypair: Keypair;
     private connection:  Connection;
@@ -40,7 +42,7 @@ export class Wallet {
             const coinData = await this.token.getTokenMeta()
 
             if (!coinData) {
-                console.log("Failed to retrieve coin data...");
+                logger.error("Failed to retrieve coin data...");
                 return;
             }
 
@@ -109,13 +111,13 @@ export class Wallet {
             transaction.sign([this.keypair]);
             const txId = await this.connection.sendTransaction(transaction);
 
-            console.log(`https://solscan.io/tx/${txId}`);
+            logger.info(`https://solscan.io/tx/${txId}`);
 
             } catch (e: unknown) {
                 if (typeof e === "string") {
-                   console.log(e.toUpperCase())// works, `e` narrowed to string
+                   logger.error(e.toUpperCase())// works, `e` narrowed to string
                 } else if (e instanceof Error) {
-                    console.log(e.message)// works, `e` narrowed to Error
+                    logger.error(e.message)// works, `e` narrowed to Error
                 }
             }
     }
@@ -125,7 +127,7 @@ export class Wallet {
             const coinData = await this.token.getTokenMeta()
 
             if (!coinData) {
-                console.log("Failed to retrieve coin data...");
+                logger.error("Failed to retrieve coin data...");
                 return;
             }
 
@@ -186,13 +188,13 @@ export class Wallet {
             transaction.sign([this.keypair]);
             const txId = await this.connection.sendTransaction(transaction);
 
-            console.log(`https://solscan.io/tx/${txId}`);
+            logger.info(`https://solscan.io/tx/${txId}`);
 
             } catch (e: unknown) {
                 if (typeof e === "string") {
-                   console.log(e.toUpperCase())// works, `e` narrowed to string
+                   logger.error(e.toUpperCase())// works, `e` narrowed to string
                 } else if (e instanceof Error) {
-                    console.log(e.message)// works, `e` narrowed to Error
+                    logger.error(e.message)// works, `e` narrowed to Error
                 }
             }
     }

@@ -2,11 +2,12 @@
 import { Wallet } from './components/Wallet';
 import * as fs from 'fs';
 import * as path from 'path';
-import chalk from 'chalk';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import {Token} from "./components/Token";
 import { SOLANA_RPC } from './components/constants';
+import * as logger from "./components/logger";
 
+logger.setLevel("INFO");
 
 class MainApp {
     private wallets: Wallet[];
@@ -17,7 +18,7 @@ class MainApp {
     constructor() {
         this.wallets = [];
         this.connection = new Connection(SOLANA_RPC)
-        console.log(chalk.blue('application has started...'));
+        logger.debug('application has started...');
 
         const mint_contract = "H8EZLMCZnY5ZmtHPLUCDFuHmQW1eg2hqYM8QzgWbpump";
         this.mint = new Token(mint_contract, this.connection);
@@ -36,7 +37,7 @@ class MainApp {
                 this.wallets.push(wallet);
             });
         } catch (error: any) {
-            console.error(chalk.red(`error reading file: ${error.message}`));
+            logger.error(`error reading file: ${error.message}`);
         }
     }
 
@@ -47,14 +48,14 @@ class MainApp {
 
     public async getAllBalance() {
         for (const wallet of app.getWallets()) {
-            console.log(chalk.green(`public key: ${wallet.getPublicKey()}`));
+            logger.info(`public key: ${wallet.getPublicKey()}`);
             try {
                 let balance: any = await wallet.getBalance();
                 balance = Number.parseFloat(balance) / LAMPORTS_PER_SOL;
-                console.log(chalk.green(`balance: ${balance} SOL`))
+                logger.info(`balance: ${balance} SOL`);
                 
             } catch (err: any) {
-                console.log(chalk.red(`error: ${err.message}`))
+                logger.info(`error: ${err.message}`)
             }
         }
     }
@@ -64,6 +65,6 @@ class MainApp {
 // Example usage
 const app = new MainApp();
 app.createWalletsFromFile('wallets.txt');
-// app.getAllBalance();
+app.getAllBalance();
 // app.getWallets()[0].buy(0.05, 0.1);
-app.getWallets()[0].sell(1700000, 0.1);
+// app.getWallets()[0].sell(1700000, 0.1);
