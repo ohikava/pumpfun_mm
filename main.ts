@@ -8,6 +8,9 @@ import {Token} from "./components/Token";
 import * as logger from "./components/logger";
 import config from "./config.json" with {"type": "json"};
 import * as readline from 'readline';
+import {Dispatcher} from "./components/dispatcher";
+import { SingleBar } from "cli-progress";
+
 
 logger.setLevel("INFO");
 
@@ -15,6 +18,7 @@ class MainApp {
     private wallets: Wallet[];
     public mint: Token;
     private connection: Connection
+    private dispatcher: Dispatcher;
 
 
     constructor() {
@@ -23,6 +27,7 @@ class MainApp {
         logger.debug('application has started...');
 
         this.mint = new Token(config.CA, this.connection);
+        this.dispatcher = new Dispatcher(config.apiKey, config.apiSecret, config.passwordOKX);
 
 
     }
@@ -119,6 +124,33 @@ class MainApp {
         await this.sellFromList(this.wallets);
     }
 
+    public async dispatchFromOKX() {
+        let bar = new SingleBar({
+            format: `Вывод | ${"{bar}"} | {value}/{total} с.`,
+            barCompleteChar: "\u2588",
+            barIncompleteChar: "\u2591",
+            hideCursor: true,
+          });
+          
+        bar.start(this.wallets.length, 0);
+
+        for (let i = 0; i < this.wallets.length; i++) {
+            const currentWallet = this.wallets[i];
+            const params = {
+                "fee": config.solFee,
+            }
+            try {
+                this.dispatcher.withdraw(config.dispatchAmountSol, currentWallet.getPublicKey(), params)
+            } catch (error: any) {
+                logger.error(error.message);
+            }
+
+            bar.update(1);
+            
+        }
+        bar.stop();
+    }
+
 
 }
 
@@ -131,15 +163,17 @@ setTimeout(() => {
         output: process.stdout
     });
     
-    rl.question('please select an option: [1] buy all or [2] sell all\n', (answer) => {
-    let choice;
+    rl.question('please select an option: [1] buy all or [2] sell all or [3] dispatch from OKX\n', (answer) => {
 
     switch (parseInt(answer)) {
         case 1:
-            app.buyFromAll()
+            app.buyFromAll();
             break;
         case 2:
-            app.sellFromAll()
+            app.sellFromAll();
+            break;
+        case 3:
+            app.dispatchFromOKX();
             break;
         default:
             console.log("invalid selection. Please try again.");

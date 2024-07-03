@@ -16,7 +16,7 @@ import {
 export class Token {
     public mint: PublicKey;
     private connection: Connection
-    public decimals: Number;
+    public decimals: number;
     public tokenMeta: Object | undefined;
     constructor(mint: string, connection: Connection) {
         this.mint = new PublicKey(mint)
@@ -56,7 +56,7 @@ export class Token {
         return tokenOut;
     }
 
-    public async calculateTokenPrice() {
+    public async calculateTokenPrice(): Promise<number> {
         if (typeof this.tokenMeta) {
             this.tokenMeta = await this.getTokenMeta()
         }
