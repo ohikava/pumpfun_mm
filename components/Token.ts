@@ -23,9 +23,12 @@ export class Token {
         this.connection = connection;
         this.decimals = 6;
         this.getDecimals()
+        this.getTokenMeta()
     }
 
-
+    public getTotalSupply() {
+        return this.tokenMeta['total_supply'] / 10**6;
+    }
     public async getTokenMeta() {
         const url = `https://frontend-api.pump.fun/coins/${this.mint.toString()}`;
 
