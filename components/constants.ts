@@ -15,3 +15,4 @@ export const NUM_SIGNATURES = 1;
 export const UNITS_BUDGET_SELL = 32062;
 export const UNITS_BUDGET_BUY = 36254;
 export const MICROLAMPORTS_PER_LAMPORT = 1_000_000
+export const CONFIG_PATH = "config.json"
