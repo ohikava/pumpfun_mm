@@ -2,6 +2,8 @@ import bs58 from 'bs58'
 import {Keypair, 
         VersionedTransaction, 
         TransactionInstruction, 
+        Transaction, 
+        SystemProgram,
         Connection, 
         LAMPORTS_PER_SOL, 
         PublicKey, 
@@ -135,16 +137,15 @@ export class Wallet {
                 const txId = await this.connection.sendTransaction(tx);
 
                 logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} BUY ${solIn} SOL. tx: ${txId}`);
-                this.tokenBalance += newTokenBalance;
-                this.balance -= solIn;
                 return true;
             }
 
             } catch (e: unknown) {
-                this.tokenBalance = 0;
                 if (typeof e === "string") {
-                   logger.error(e.toUpperCase())// works, `e` narrowed to string
+                    logger.error(`${this.getPublicKey()} ${solIn} sol`)
+                    logger.error(e.toUpperCase())// works, `e` narrowed to string
                 } else if (e instanceof Error) {
+                    logger.error(`${this.getPublicKey()} ${solIn} sol`)
                     logger.error(e.message)// works, `e` narrowed to Error
                 }
                 return false;
@@ -236,15 +237,15 @@ export class Wallet {
             if (tx) {
                 const txId = await this.connection.sendTransaction(tx);
                 logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${tokenOut} tokens. tx: ${txId}`);
-                this.tokenBalance = Math.max(this.tokenBalance - tokenOut, 0);
-                this.balance += minSolOutput;
                 return true;
             }
 
             } catch (e: unknown) {
                 if (typeof e === "string") {
-                   logger.error(e.toUpperCase())// works, `e` narrowed to string
+                    logger.error(`${this.getPublicKey()} ${tokenOut} tokens`)
+                    logger.error(e.toUpperCase())// works, `e` narrowed to string
                 } else if (e instanceof Error) {
+                    logger.error(`${this.getPublicKey()} ${tokenOut} tokens`)
                     logger.error(e.message)// works, `e` narrowed to Error
                 }
                 return false; 
@@ -286,5 +287,45 @@ export class Wallet {
         }
         this.tokenBalance = balance;
         return balance;
+    }
+
+    public async withdrawSOL(to: PublicKey) {
+        try {
+            await this.getSolBalance();
+            
+            const instructions = [
+                SystemProgram.transfer({
+                fromPubkey: this.keypair.publicKey,
+                toPubkey: to,
+                lamports: 0.01 * LAMPORTS_PER_SOL,
+                }),
+            ];
+
+            const messageV0 = new TransactionMessage({
+                payerKey: this.keypair.publicKey,
+                recentBlockhash: (await this.connection.getLatestBlockhash()).blockhash,
+                instructions,
+            }).compileToV0Message();
+
+            const transaction = new VersionedTransaction(messageV0);
+    
+            // sign your transaction with the required `Signers`
+            transaction.sign([this.keypair]);
+
+            const txId = await this.connection.sendTransaction(transaction);
+            logger.info(`tx: ${txId}`);
+            return true 
+
+        } catch (e: unknown) {
+            if (typeof e === "string") {
+                logger.error(`${this.getPublicKey()} ${(this.balance - 0.000015 * LAMPORTS_PER_SOL - 125000) / LAMPORTS_PER_SOL} SOL`)
+                logger.error(e.toUpperCase())// works, `e` narrowed to string
+            } else if (e instanceof Error) {
+                logger.error(`${this.getPublicKey()} ${(this.balance - 0.000015 * LAMPORTS_PER_SOL - 125000) / LAMPORTS_PER_SOL} SOL`)
+                logger.error(e.message)// works, `e` narrowed to Error
+            }
+            return false; 
+        }
+
     }
 }

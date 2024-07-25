@@ -5,13 +5,15 @@ import { readJson } from "./components/utils";
 import { CONFIG_PATH } from "./components/constants";
 import { Config } from "./components/interfaces";
 
-logger.setLevel("INFO");
+logger.setLevel("DEBUG");
 
 (async () => {
     const config: Config = await readJson(CONFIG_PATH);
     const mm = new MM(config)
 
     const app = express();
+    app.use(express.json());
+
     app.get('/', (req: Request, res: Response) => {
         res.send('Hello, TypeScript Express!');
       });
@@ -27,7 +29,15 @@ logger.setLevel("INFO");
     });
     
       app.get('/sellall', (req: Request, res: Response) => {
-        mm.sellFromAll();
+        let updateBalance = true;
+        let randomSleepTime = true;
+        if ("updateBalance" in req.query) {
+            updateBalance = ("true" == req.query.updateBalance)
+        }
+        if ("randomSleepTime" in req.query) {
+            randomSleepTime = ("true" == req.query.randomSleepTime)
+        }
+        mm.sellFromAll(updateBalance, randomSleepTime);
         res.send("sell all");
       });
     
@@ -55,18 +65,34 @@ logger.setLevel("INFO");
         res.send(`generation started`)
       });
     
-    app.get("/reloadconfig", (req: Request, res: Response) => {
+    app.get("/reloadconfigfile", (req: Request, res: Response) => {
         (async () => {
             const newconfig = await readJson(CONFIG_PATH);
             mm.reloadConfig(newconfig);
             res.send("reloading has ended")
         })()
       });
+    
+    app.post("/reloadconfig", (req: Request, res: Response) => {
+      let cloneConfig: Config = {...mm.config};
+
+      for (let key in cloneConfig) {
+        if (key in req.body) {
+          cloneConfig[key] = req.body[key];
+        }
+      }
+      mm.reloadConfig(cloneConfig);
+      res.send(cloneConfig);
+      });
 
     app.get("/getconfig", (req: Request, res: Response) => {
         res.send(mm.config);
     })
     
+    app.get("/withdrawall/:address", (req: Request, res: Response) => {
+        mm.withdrawall(req.params['address'])
+        res.send('withdraw');
+    })
     app.listen(3000, () => {
         console.log(`Server running at http://localhost:${3000}`);
     });

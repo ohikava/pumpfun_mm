@@ -3,11 +3,10 @@ import { Wallet } from './components/Wallet';
 import {getRandomDecimalInRange, round} from "./components/utils";
 import * as fs from 'fs';
 import * as path from 'path';
-import { Connection, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import {Token} from "./components/Token";
 import {BASE_FEE, NUM_SIGNATURES, MICROLAMPORTS_PER_LAMPORT, UNITS_BUDGET_BUY, UNITS_BUDGET_SELL} from "./components/constants";
 import * as logger from "./components/logger";
-// import config from "./config.json" with {"type": "json"};
 import bs58 from 'bs58'
 import { Config } from './components/interfaces';
 
@@ -25,7 +24,6 @@ export class MM {
         this.holders = new Set<string>();
         this.traders = new Set<string>();
         this.connection = new Connection(config.RPC)
-        logger.debug('application has started...');
 
         this.mint = new Token(config.CA, this.connection);
         this.config = config;
@@ -102,14 +100,14 @@ export class MM {
         logger.info(`cum sol balance: ${round(cumBalance, 4)}, cum token balance: ${round(cumTokenBalance, 0)}, percentage of supply: ${round(cumTokenBalance / this.mint.getTotalSupply() * 100, 3)}%`);
     }
 
-    public async buyFromList(walletsList: Wallet[]): Promise<Number[]> {
+    public async buyFromList(walletsList: Wallet[], updateBalance=true): Promise<Number[]> {
         let successCount = 0;
         let totalSum = 0;
         const successBuyList: Number[] = [];
-
+        let currentWallet;
         for (let i = 0; i < walletsList.length; i++) {
             
-            const currentWallet = walletsList[i];
+            currentWallet = walletsList[i];
             // var randomSum = getRandomDecimalInRange(config.minBuyAmountSol, config.maxBuyAmountSol);
             var randomSum = walletsList[i].balance / LAMPORTS_PER_SOL - this.config['leaveOnFeeSol'];
             randomSum = round(randomSum, 3);
@@ -132,8 +130,18 @@ export class MM {
                 await new Promise(resolve => setTimeout(resolve, randomWaitTime));
             }
         }
+        
+        if (updateBalance) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            for (let i in successBuyList) {
+                currentWallet = walletsList[i];
+                await currentWallet.getSolBalance()
+                await currentWallet.getTokenBalance()
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
 
-        logger.info(`BUY success rate: ${successCount / walletsList.length}, total sum: ${totalSum}`);
+        logger.info(`BUY success: ${successCount}/${walletsList.length}, total sum: ${totalSum}`);
         return successBuyList;
     }
 
@@ -141,18 +149,23 @@ export class MM {
         await this.buyFromList(this.wallets);
     }
 
-    public async sellFromList(walletsList: Wallet[]): Promise<Number[]> {
+    public async sellFromList(walletsList: Wallet[], updateBalance=true, randomSleepTime=true): Promise<Number[]> {
         let successCount = 0;
         let totalSum = 0;
         let successSellList: Number[] = [];
+        let currentWallet: Wallet;
 
         for (let i = 0; i < walletsList.length; i++) {
-            const currentWallet = walletsList[i];
+            currentWallet = walletsList[i];
             let balance: number;
             if (currentWallet.tokenBalance > 0) {
                 balance = currentWallet.tokenBalance;
             } else {
                 balance = await currentWallet.getTokenAmount();
+            }
+
+            if (isNaN(balance)) {
+                balance = 0;
             }
             if (balance <= 10) {
                 continue
@@ -171,16 +184,32 @@ export class MM {
                 }
             }
             if (!(i == walletsList.length - 1)) {
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (randomSleepTime) {
+                    const randomWaitTime = getRandomDecimalInRange(this.config.minSleepTime, this.config.maxSleepTime) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, randomWaitTime));
+                } else {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
             }
         }
+
+        if ((updateBalance) && (successSellList.length > 0)) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            for (let i in successSellList) {
+                currentWallet = walletsList[i];
+                await currentWallet.getSolBalance()
+                await currentWallet.getTokenBalance()
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        
         const tokenPrice = await this.mint.calculateTokenPrice();
-        logger.info(`SELL success rate: ${successCount / walletsList.length}, total sum: ${round(totalSum * tokenPrice / 10**3, this.mint.decimals)}`);
+        logger.info(`SELL success: ${successCount}/${walletsList.length}, total sum: ${round(totalSum * tokenPrice / 10**3, this.mint.decimals)}`);
         return successSellList;
     }
 
-    public async sellFromAll() {
-        await this.sellFromList(this.wallets);
+    public async sellFromAll(updateBalance: boolean, randomSleepTime: boolean) {
+        await this.sellFromList(this.wallets, updateBalance, randomSleepTime);
     }
 
     public generateWallets(n: number, privatePath: string = "private.txt", publicPath: string = "public.txt"): void {
@@ -251,9 +280,7 @@ export class MM {
         for(let i = 0; i < this.wallets.length; i++) {
             totalSupply += this.wallets[i].tokenBalance;
         }
-        console.log(totalSupply)
         const sellAmountTotal = amountInPercents * totalSupply / 100
-        console.log(sellAmountTotal)
         
         let sellAmountReal = 0;
         const sellingWallets: Wallet[] = [];
@@ -302,6 +329,31 @@ export class MM {
         // await this.printInterface()
     }
 
-}
+    public async withdrawall(address: string) {
+        let currentWallet;
+        let success_rate = 0
+        let successWithdrawList: string[] = [];
+        let isSuccess;
 
+        const addressKey = new PublicKey(address);
+        for (let ix = 0; ix < this.wallets.length; ix++) {
+            currentWallet = this.wallets[ix];
+            
+            isSuccess = await currentWallet.withdrawSOL(addressKey);
+
+            if (!isSuccess) {
+                successWithdrawList.push(currentWallet.getPublicKey())
+            } else {
+                success_rate += 1;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+        }
+
+        logger.info(`success rate: ${success_rate}/${this.wallets.length}`)
+        logger.error(`errors: ${JSON.stringify(successWithdrawList)}`);
+    }
+
+
+}
 
