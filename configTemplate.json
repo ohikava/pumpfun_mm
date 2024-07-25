@@ -1,14 +1,15 @@
 {
-    "minBuyAmountSol": 0.01,
-    "maxBuyAmountSol": 0.05,
     "minSleepTime": 3,
     "maxSleepTime": 10,
-    "slippage": 0.1,
+    "slippage": 0.5,
     "RPC": "",
-    "CA": "",
-    "apiKey": "",
-    "apiSecret": "",
-    "passwordOKX": "",
-    "dispatchAmountSol": 0.07,
-    "solFee": 0.008
+    "CA": "5DaWEkEdWMEgPoZ3jm3WaWiDfDEf96PwQZHhLC47pump",
+    "unitPrice": 1500000,
+    "unitBudget": 100000,
+    "holderWalletsAmountInPercents": 70,
+    "leaveOnFeeSol": 0.01,
+    "minRandomTxAmountInPercents": 20,
+    "maxRandomTxAmountInPercents": 30,
+    "rpcReqSleep": 200,
+    "rpcSendTxSleep": 1000
 }

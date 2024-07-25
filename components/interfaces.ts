@@ -7,6 +7,11 @@ export interface Config {
     unitPrice: number,
     unitBudget: number,
     holderWalletsAmountInPercents: number,
-    leaveOnFeeSol: number
+    leaveOnFeeSol: number,
+    minRandomTxAmountInPercents: number,
+    maxRandomTxAmountInPercents: number,
+    rpcReqSleep: number,
+    rpcSendTxSleep: number
+
 
 }

@@ -17,7 +17,9 @@ import {GLOBAL,
         EVENT_AUTHORITY, 
         PUMP_FUN_PROGRAM, 
         UNITS_BUDGET_BUY,
-        UNITS_BUDGET_SELL
+        UNITS_BUDGET_SELL,
+        BUY,
+        SELL
     } from "./constants";
 
 import {bufferFromUInt64} from "./utils"
@@ -35,6 +37,7 @@ export class Wallet {
     public balance: number;
     private config: Config;
     public tokenBalance: number;
+    public nextTxType: string;
 
 
     constructor(privateKey: string, token: Token, connection: Connection, config: Config) {
@@ -48,6 +51,8 @@ export class Wallet {
         this.balance = 0;
         this.getSolBalance()
         this.getTokenBalance()
+        this.nextTxType = "";
+        
     }
 
     public async getBuyTx(solIn: number, slippageDecimal: number): Promise<any[]>{

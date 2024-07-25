@@ -47,15 +47,27 @@ logger.setLevel("DEBUG");
       });
     
       app.get('/buyamountinsol/:solamount', (req: Request, res: Response) => {
+        let randomTx = false;
+        if ("randomTx" in req.query) {
+          randomTx = ("true" == req.query.randomTx)
+        }
+
         const solAmount = Number.parseFloat(req.params['solamount'])
-        mm.buyAmountSol(solAmount);
+        mm.buyAmountSol(solAmount, randomTx);
+
         res.send(`buy ${solAmount} SOL`);
       });
     
     
       app.get("/sellamountinpercents/:percentsamount", (req: Request, res: Response) => {
+        let randomTx = false;
+        if ("randomTx" in req.query) {
+          randomTx = ("true" == req.query.randomTx)
+        }
+
         const percentAmount = Number.parseFloat(req.params['percentsamount'])
-        mm.sellAmountInPercents(percentAmount);
+        mm.sellAmountInPercents(percentAmount, randomTx);
+        
         res.send(`sell ${percentAmount}%`)
       });
     
