@@ -17,6 +17,7 @@ import {GLOBAL,
         EVENT_AUTHORITY, 
         PUMP_FUN_PROGRAM, 
         UNITS_BUDGET_BUY,
+        BASE_FEE,
         UNITS_BUDGET_SELL,
         BUY,
         SELL
@@ -297,12 +298,14 @@ export class Wallet {
     public async withdrawSOL(to: PublicKey) {
         try {
             await this.getSolBalance();
+            const balance = this.balance;
+
             
             const instructions = [
                 SystemProgram.transfer({
                 fromPubkey: this.keypair.publicKey,
                 toPubkey: to,
-                lamports: 0.01 * LAMPORTS_PER_SOL,
+                lamports: balance - BASE_FEE,
                 }),
             ];
 
