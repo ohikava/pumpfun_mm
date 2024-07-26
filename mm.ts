@@ -1,6 +1,6 @@
 // MainApp.ts
 import { Wallet } from './components/Wallet';
-import {getRandomDecimalInRange, round, getRandomIntInRange, shuffle} from "./components/utils";
+import {getRandomDecimalInRange, round, getRandomIntInRange, shuffle, readJson} from "./components/utils";
 import * as fs from 'fs';
 import * as path from 'path';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
@@ -9,6 +9,7 @@ import {BASE_FEE, NUM_SIGNATURES, MICROLAMPORTS_PER_LAMPORT, UNITS_BUDGET_BUY, U
 import * as logger from "./components/logger";
 import bs58 from 'bs58'
 import { Config } from './components/interfaces';
+import { StatisticItem } from './components/interfaces';
 
 export class MM {
     private wallets: Wallet[];
@@ -101,6 +102,27 @@ export class MM {
             this.wallets[i].nextTxType = BUY;
         }
         await this.sendTxFromList(this.wallets, true, true);
+    }
+
+    public async saveStatistic(statisticPath: string = "statistic.json") {
+        const res: {[key: string]: StatisticItem} = {};
+        let curr: Wallet, pk: string;
+        for (let i = 0; i < this.wallets.length; i++) {
+            curr = this.wallets[i];
+            pk = curr.getPublicKey();
+            res[pk] = {
+                "solBalance": curr.balance / LAMPORTS_PER_SOL,
+                "tokenBalance": curr.tokenBalance
+            }
+        }
+        fs.writeFile(statisticPath, JSON.stringify(res), (err) => {
+            if (err) {
+                console.error('ошибка при записи в файл:', err);
+            } else {
+                console.log(`статистика о кошелька записана в файл statistic.json`);
+            }
+        });
+        
     }
 
     public async sendTxFromList(walletsList: Wallet[], updateBalance=true, randomSleepTime=true) {
@@ -371,6 +393,33 @@ export class MM {
         logger.error(`errors: ${JSON.stringify(successWithdrawList)}`);
     }
 
+    public async savePKOnlyFromConf(dispatchConfPath: string = "dispatch_config.json", privatePath: string = "wallets.txt", newPrivatePath: string = "wallets_merged.txt") {
+        const dispatchConf = await readJson(dispatchConfPath);
+        const data = fs.readFileSync(path.resolve(privatePath), 'utf-8');
+        const keys = data.split('\n').filter(line => line.trim() !== '');
+        let currWallet: Wallet;
+        const res: string[] = [];
+        
+
+        for (let i = 0; i < this.wallets.length; i++) {
+            currWallet = this.wallets[i];
+
+            if (currWallet.getPublicKey() in dispatchConf) {
+                res.push(keys[i])
+            }
+        }
+
+        let data_row = res.join('\n');
+        fs.writeFile(newPrivatePath, data_row, (err) => {
+            if (err) {
+                console.error('ошибка при записи в файл:', err);
+            } else {
+                console.log(`${res.length} приватный ключей были успешно записанны в ${newPrivatePath}`);
+            }
+        });
+
+
+    }
 
 }
 

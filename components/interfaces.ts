@@ -12,6 +12,10 @@ export interface Config {
     maxRandomTxAmountInPercents: number,
     rpcReqSleep: number,
     rpcSendTxSleep: number
-
-
 }
+
+export interface StatisticItem {
+    solBalance: number,
+    tokenBalance: number
+}
+

@@ -67,7 +67,7 @@ logger.setLevel("DEBUG");
 
         const percentAmount = Number.parseFloat(req.params['percentsamount'])
         mm.sellAmountInPercents(percentAmount, randomTx);
-        
+
         res.send(`sell ${percentAmount}%`)
       });
     
@@ -105,6 +105,16 @@ logger.setLevel("DEBUG");
         mm.withdrawall(req.params['address'])
         res.send('withdraw');
     })
+
+    app.get("/saveonlydispatchedwallets", (req: Request, res: Response) => {
+      mm.savePKOnlyFromConf()
+      res.send('saved');
+  })
+
+    app.get("/savestatistic", (req: Request, res: Response) => {
+      mm.saveStatistic()
+      res.send("statistic has been saved!")
+})
     app.listen(3000, () => {
         console.log(`Server running at http://localhost:${3000}`);
     });
