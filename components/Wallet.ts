@@ -19,8 +19,7 @@ import {GLOBAL,
         UNITS_BUDGET_BUY,
         BASE_FEE,
         UNITS_BUDGET_SELL,
-        BUY,
-        SELL
+        RANKS
     } from "./constants";
 
 import {bufferFromUInt64} from "./utils"
@@ -39,6 +38,7 @@ export class Wallet {
     private config: Config;
     public tokenBalance: number;
     public nextTxType: string;
+    public rank: RANKS;
 
 
     constructor(privateKey: string, token: Token, connection: Connection, config: Config) {
@@ -53,15 +53,16 @@ export class Wallet {
         this.getSolBalance()
         this.getTokenBalance()
         this.nextTxType = "";
+        this.rank = RANKS.LOW;
         
     }
 
-    public async getBuyTx(solIn: number, slippageDecimal: number): Promise<any[]>{
+    public async getBuyTx(solIn: number, slippageDecimal: number): Promise<VersionedTransaction|boolean>{
         const coinData = await this.token.getTokenMeta()
 
         if (!coinData) {
             logger.error("Failed to retrieve coin data...");
-            return [];
+            return false;
         }
 
         let tokenAccountInstructions: TransactionInstruction[] = [];
@@ -133,12 +134,16 @@ export class Wallet {
 
         const transaction = new VersionedTransaction(compiledMessage);
         transaction.sign([this.keypair]);
-        return[transaction, tokenOut]
+        return transaction
     }
 
     public async buy(solIn: number, slippageDecimal: number) {
         try {
-            const [tx, newTokenBalance] = await this.getBuyTx(solIn, slippageDecimal);
+            if (this.token.sb.isRunning) {
+                return this.token.sb.buy(this.getPublicKey(), solIn);
+            }
+
+            const tx = await this.getBuyTx(solIn, slippageDecimal);
             if (tx) {
                 const txId = await this.connection.sendTransaction(tx);
 
@@ -157,12 +162,12 @@ export class Wallet {
                 return false;
             }
     }
-    public async getSellTx(tokenOut: number, slippageDecimal: number): Promise<any[]> {
+    public async getSellTx(tokenOut: number, slippageDecimal: number): Promise<VersionedTransaction|boolean> {
         const coinData = await this.token.getTokenMeta()
 
         if (!coinData) {
             logger.error("Failed to retrieve coin data...");
-            return [];
+            return false;
         }
 
         let tokenAccountInstructions: TransactionInstruction[] = [];
@@ -235,11 +240,15 @@ export class Wallet {
 
         const transaction = new VersionedTransaction(compiledMessage);
         transaction.sign([this.keypair]);
-        return [transaction, minSolOutput];
+        return transaction;
     }
     public async sell(tokenOut: number, slippageDecimal: number) {
         try {
-            const [tx, minSolOutput] = await this.getSellTx(tokenOut, slippageDecimal);
+            if (this.token.sb.isRunning) {
+                return this.token.sb.sell(this.getPublicKey(), tokenOut);
+            }
+
+            const tx = await this.getSellTx(tokenOut, slippageDecimal);
             if (tx) {
                 const txId = await this.connection.sendTransaction(tx);
                 logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${tokenOut} tokens. tx: ${txId}`);
@@ -268,6 +277,9 @@ export class Wallet {
     }
 
     public async getTokenAmount() {
+        if (this.token.sb.isRunning) {
+            return this.token.sb.getBalance(this.getPublicKey())
+        }
         const tokenAccountInfo = await this.getTokenAccountInfo();
         return tokenAccountInfo.value?.data.parsed.info.tokenAmount.amount / 10 ** this.token.decimals;
     }
@@ -281,6 +293,10 @@ export class Wallet {
     }
 
     public async getSolBalance(): Promise<number> {
+        if (this.token.sb.isRunning) {
+            this.balance = this.token.sb.getSolBalance(this.getPublicKey());
+            return this.balance;
+        }
         const balance = await this.connection.getBalance(this.keypair.publicKey);
         this.balance = balance;
         return balance;

@@ -18,3 +18,8 @@ export const MICROLAMPORTS_PER_LAMPORT = 1_000_000
 export const CONFIG_PATH = "config.json";
 export const BUY = "BUY";
 export const SELL = "SELL";
+export enum RANKS {
+    HIGH = "HIGH",
+    LOW = "LOW",
+    MID = "MID"
+};

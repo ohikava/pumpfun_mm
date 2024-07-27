@@ -3,7 +3,6 @@ import {
     PublicKey, 
     Keypair, 
     Transaction, 
-    sendAndConfirmTransaction,
     LAMPORTS_PER_SOL
 } from '@solana/web3.js';
 import { 
@@ -12,16 +11,26 @@ import {
     getAssociatedTokenAddress, 
     createAssociatedTokenAccountInstruction 
 } from '@solana/spl-token';
+import { Sandbox } from './sandbox';
+import { TokenMeta } from './interfaces';
 
 export class Token {
     public mint: PublicKey;
     private connection: Connection
     public decimals: number;
-    public tokenMeta: Object | undefined;
-    constructor(mint: string, connection: Connection) {
+    public tokenMeta: TokenMeta;
+    public sb: Sandbox;
+    constructor(mint: string, connection: Connection, sb: Sandbox) {
         this.mint = new PublicKey(mint)
         this.connection = connection;
         this.decimals = 6;
+        this.sb = sb;
+        this.tokenMeta = {
+            "total_supply": 0,
+            "virtual_sol_reserves": 1,
+            "virtual_token_reserves": 1
+        }
+
         this.getDecimals()
         this.getTokenMeta()
     }
@@ -30,6 +39,10 @@ export class Token {
         return this.tokenMeta['total_supply'] / 10**6;
     }
     public async getTokenMeta() {
+        if (this.sb.isRunning) {
+            this.tokenMeta = this.sb.getTokenMeta()
+            return this.tokenMeta
+        }
         const url = `https://frontend-api.pump.fun/coins/${this.mint.toString()}`;
 
         const headers = {
@@ -105,6 +118,10 @@ export class Token {
     }
 
     public async getDecimals() {
+        if (this.sb.isRunning) {
+            this.decimals = this.sb.getDecimals()
+            return;
+        }
         const tokenInfo = await this.getAccountInfo();
         // console.log(this.decimals)
         this.decimals = tokenInfo.decimals;

@@ -5,44 +5,59 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import {Token} from "./components/Token";
-import {BASE_FEE, NUM_SIGNATURES, MICROLAMPORTS_PER_LAMPORT, UNITS_BUDGET_BUY, UNITS_BUDGET_SELL, BUY, SELL} from "./components/constants";
+import {BASE_FEE, NUM_SIGNATURES, MICROLAMPORTS_PER_LAMPORT, UNITS_BUDGET_BUY, UNITS_BUDGET_SELL, BUY, SELL, RANKS} from "./components/constants";
 import * as logger from "./components/logger";
 import bs58 from 'bs58'
-import { Config } from './components/interfaces';
-import { StatisticItem } from './components/interfaces';
+import { Config, StatisticItem, DispatchConf } from './components/interfaces';
+import { Sandbox } from './components/sandbox';
 
 export class MM {
     private wallets: Wallet[];
     public mint: Token;
     private connection: Connection;
     public config: Config;
+    public sb: Sandbox;
 
 
     constructor(config: Config) {
+        this.config = config;
         this.wallets = [];
         this.connection = new Connection(config.RPC)
 
-        this.mint = new Token(config.CA, this.connection);
-        this.config = config;
+        this.sb = new Sandbox();
+        this.sb.setIsRunning(this.config.simulation)
+
+        this.mint = new Token(config.CA, this.connection, this.sb);
     }
 
     public reloadConfig(newConfig: Config) {
         logger.info("reloading...")
-        this.connection = new Connection(newConfig.RPC);
-        this.mint = new Token(newConfig.CA, this.connection);
         this.config = newConfig;
+        this.connection = new Connection(newConfig.RPC);
+        this.sb.setIsRunning(this.config.simulation);
+        this.mint = new Token(newConfig.CA, this.connection, this.sb);
     };
     // Method to read private keys from a file and create wallets
-    public async createWalletsFromFile(filePath: string): Promise<void> {
+    public async createWalletsFromFile(filePath: string, dispatchConfPath: string): Promise<void> {
         try {
             const data = fs.readFileSync(path.resolve(filePath), 'utf-8');
             const keys = data.split('\n').filter(line => line.trim() !== '');
             
+            const dispatchConf: {[key: string]: DispatchConf} = await readJson(dispatchConfPath);
+
             let privateKey: string;
             for (let i = 0; i < keys.length; i++) {
                 privateKey = keys[i];
                 const wallet = new Wallet(privateKey.trim(), this.mint, this.connection, this.config);
+
+                const rank: RANKS = dispatchConf[wallet.getPublicKey()]['rank'];
+                wallet.rank = rank;
+
                 this.wallets.push(wallet);
+
+                const dispatchSolBalance: number = dispatchConf[wallet.getPublicKey()]['solBalance'];
+                this.sb.setSolBalance(wallet.getPublicKey(), dispatchSolBalance * LAMPORTS_PER_SOL)
+
                 logger.info(`${i+1}/${keys.length}`);
 
                 await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
@@ -364,7 +379,7 @@ export class MM {
     public async start() {
         logger.info("start...")
         await this.mint.getTokenMeta();
-        await this.createWalletsFromFile('wallets.txt');
+        await this.createWalletsFromFile('wallets.txt', "dispatch_config.json");
         // await this.printInterface()
     }
 
