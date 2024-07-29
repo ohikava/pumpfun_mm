@@ -63,23 +63,8 @@ export class Token {
         this.tokenMeta = r_body;
         return r_body;
     }
-    public calculateTokenOut (solIn: number, coinData: any) {
-        const virtualSolReserves = coinData.virtual_sol_reserves;
-        const virtualTokenReserves = coinData.virtual_token_reserves;
-        const solInLamports = solIn * LAMPORTS_PER_SOL;
-        const tokenOut = Math.floor(solInLamports * virtualTokenReserves / virtualSolReserves);
 
-        return tokenOut;
-    }
 
-    public async calculateTokenPrice(): Promise<number> {
-        if (typeof this.tokenMeta) {
-            this.tokenMeta = await this.getTokenMeta()
-        }
-        const coinData = this.tokenMeta;
-
-        return coinData['virtual_sol_reserves'] / coinData['virtual_token_reserves'];
-    }
     public async checkIfTokenAccountExist(
         wallet: Keypair,
     ): Promise<[Boolean, PublicKey]> {

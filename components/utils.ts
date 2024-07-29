@@ -39,3 +39,12 @@ export function shuffle(array: any) {
         array[randomIndex], array[currentIndex]];
     }
   }
+
+export function formatError(err: any): string {
+    if (typeof err === "string") {
+        return err.toUpperCase();
+    } else if (err instanceof Error) {
+        return err.message;
+    }
+    return ""
+}

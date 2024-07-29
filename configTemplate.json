@@ -11,5 +11,8 @@
     "minRandomTxAmountInPercents": 20,
     "maxRandomTxAmountInPercents": 30,
     "rpcReqSleep": 200,
-    "rpcSendTxSleep": 1000
+    "rpcSendTxSleep": 1000,
+    "errorSleep": 1000,
+    "errorMaxTries": 5,
+    "simulation": false
 }

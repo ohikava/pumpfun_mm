@@ -14,7 +14,9 @@ export interface Config {
     maxRandomTxAmountInPercents: number,
     rpcReqSleep: number,
     rpcSendTxSleep: number,
-    simulation: boolean
+    simulation: boolean,
+    errorSleep: number,
+    errorMaxTries: number
 }
 
 export interface StatisticItem {

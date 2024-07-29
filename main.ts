@@ -55,7 +55,7 @@ logger.setLevel("DEBUG");
         const solAmount = Number.parseFloat(req.params['solamount'])
         mm.buyAmountSol(solAmount, randomTx);
 
-        res.send(`buy ${solAmount} SOL`);
+        res.send(`buy ${solAmount} SOL with ${randomTx}`);
       });
     
     
@@ -68,7 +68,7 @@ logger.setLevel("DEBUG");
         const percentAmount = Number.parseFloat(req.params['percentsamount'])
         mm.sellAmountInPercents(percentAmount, randomTx);
 
-        res.send(`sell ${percentAmount}%`)
+        res.send(`sell ${percentAmount}% with ${randomTx}`)
       });
     
     app.get("/generatewallets/:n", (req: Request, res: Response) => {
@@ -115,6 +115,11 @@ logger.setLevel("DEBUG");
       mm.saveStatistic()
       res.send("statistic has been saved!")
 })
+
+    app.get("/rebalance", (req: Request, res: Response) => {
+      mm.rebalanceWallets();
+      res.send("rebalancing has started!")
+    })
     app.listen(3000, () => {
         console.log(`Server running at http://localhost:${3000}`);
     });

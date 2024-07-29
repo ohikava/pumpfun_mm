@@ -19,10 +19,11 @@ import {GLOBAL,
         UNITS_BUDGET_BUY,
         BASE_FEE,
         UNITS_BUDGET_SELL,
-        RANKS
+        RANKS,
+        SENDING_ERRORS
     } from "./constants";
 
-import {bufferFromUInt64} from "./utils"
+import {bufferFromUInt64, formatError, round} from "./utils"
 
 import { Token } from './Token';
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
@@ -50,11 +51,14 @@ export class Wallet {
 
         this.config = config;
         this.balance = 0;
-        this.getSolBalance()
-        this.getTokenBalance()
         this.nextTxType = "";
         this.rank = RANKS.LOW;
         
+    }
+
+    public async init() {
+        await this.getSolBalance()
+        await this.getTokenBalance()
     }
 
     public async getBuyTx(solIn: number, slippageDecimal: number): Promise<VersionedTransaction|boolean>{
@@ -75,7 +79,7 @@ export class Wallet {
         }
         this.tokenAccountAddress = tokenAccount;
 
-        const tokenOut = this.token.calculateTokenOut(solIn, coinData);
+        const tokenOut = Math.floor(coinData['virtual_token_reserves'] / coinData['virtual_sol_reserves'] * solIn * LAMPORTS_PER_SOL);
         const solInWithSlippage = solIn * (1 + slippageDecimal);
         const maxSolCost = Math.floor(solInWithSlippage * LAMPORTS_PER_SOL);
 
@@ -138,29 +142,45 @@ export class Wallet {
     }
 
     public async buy(solIn: number, slippageDecimal: number) {
-        try {
-            if (this.token.sb.isRunning) {
-                return this.token.sb.buy(this.getPublicKey(), solIn);
-            }
+        let tx, txId, errMsg;
+        let tries = 0;
+        let shouldContinueSending = true;
 
-            const tx = await this.getBuyTx(solIn, slippageDecimal);
-            if (tx) {
-                const txId = await this.connection.sendTransaction(tx);
-
-                logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} BUY ${solIn} SOL. tx: ${txId}`);
-                return true;
-            }
-
-            } catch (e: unknown) {
-                if (typeof e === "string") {
-                    logger.error(`${this.getPublicKey()} ${solIn} sol`)
-                    logger.error(e.toUpperCase())// works, `e` narrowed to string
-                } else if (e instanceof Error) {
-                    logger.error(`${this.getPublicKey()} ${solIn} sol`)
-                    logger.error(e.message)// works, `e` narrowed to Error
+        if (this.token.sb.isRunning) {
+            return this.token.sb.buy(this.getPublicKey(), solIn, this.rank);
+        }
+        
+        while (shouldContinueSending) {
+            try {
+                tx = await this.getBuyTx(solIn, slippageDecimal);
+                if (tx) {
+                    txId = await this.connection.sendTransaction(tx);
+                    logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} BUY ${round(solIn, 3)} SOL. tx: ${txId}`);
+                    return true;
                 }
                 return false;
+            } catch (e: any) {
+                errMsg = formatError(e);
+
+                shouldContinueSending = false;
+
+                for (let i = 0; i < SENDING_ERRORS.length; i++) {
+                    if (errMsg.includes(SENDING_ERRORS[i]) && (tries < this.config.errorMaxTries)) {
+                        shouldContinueSending = true;
+                    }
+                }
+
+                if (shouldContinueSending) {
+                    tries += 1;
+                } else {
+                    logger.error(`${this.getPublicKey()} BUY ${solIn}`)
+                    logger.error(errMsg)
+                    return false;
+                }
+
+
             }
+        }
     }
     public async getSellTx(tokenOut: number, slippageDecimal: number): Promise<VersionedTransaction|boolean> {
         const coinData = await this.token.getTokenMeta()
@@ -242,29 +262,47 @@ export class Wallet {
         transaction.sign([this.keypair]);
         return transaction;
     }
+
     public async sell(tokenOut: number, slippageDecimal: number) {
-        try {
-            if (this.token.sb.isRunning) {
-                return this.token.sb.sell(this.getPublicKey(), tokenOut);
-            }
+        let tx, txId, errMsg;
+        let tries = 0;
+        let shouldContinueSending = true;
 
-            const tx = await this.getSellTx(tokenOut, slippageDecimal);
-            if (tx) {
-                const txId = await this.connection.sendTransaction(tx);
-                logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${tokenOut} tokens. tx: ${txId}`);
-                return true;
-            }
-
-            } catch (e: unknown) {
-                if (typeof e === "string") {
-                    logger.error(`${this.getPublicKey()} ${tokenOut} tokens`)
-                    logger.error(e.toUpperCase())// works, `e` narrowed to string
-                } else if (e instanceof Error) {
-                    logger.error(`${this.getPublicKey()} ${tokenOut} tokens`)
-                    logger.error(e.message)// works, `e` narrowed to Error
+        if (this.token.sb.isRunning) {
+            return this.token.sb.sell(this.getPublicKey(), tokenOut, this.rank);
+        }
+        
+        while (shouldContinueSending) {
+            try {
+                tx = await this.getSellTx(tokenOut, this.config.slippage)
+                if (tx) {
+                    txId = await this.connection.sendTransaction(tx);
+                    logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${round(tokenOut, 0)}. tx: ${txId}`);
+                    return true;
                 }
-                return false; 
+                return false;
+            } catch (e: any) {
+                errMsg = formatError(e);
+
+                shouldContinueSending = false;
+
+                for (let i = 0; i < SENDING_ERRORS.length; i++) {
+                    if (errMsg.includes(SENDING_ERRORS[i]) && (tries < this.config.errorMaxTries)) {
+                        shouldContinueSending = true;
+                    }
+                }
+
+                if (shouldContinueSending) {
+                    tries += 1;
+                } else {
+                    logger.error(`${this.getPublicKey()} SELL ${tokenOut}`)
+                    logger.error(errMsg)
+                    return false;
+                }
+
+
             }
+        }
     }
 
     public async getTokenAccountInfo() {

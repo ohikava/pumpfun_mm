@@ -19,7 +19,12 @@ export const CONFIG_PATH = "config.json";
 export const BUY = "BUY";
 export const SELL = "SELL";
 export enum RANKS {
-    HIGH = "HIGH",
     LOW = "LOW",
-    MID = "MID"
+    MID = "MID",
+    HIGH = "HIGH"
 };
+export const RANKS_IN_ORDER = [RANKS.LOW, RANKS.MID, RANKS.HIGH];
+export const SENDING_ERRORS = [
+    "Blockhash not found",
+    "Node is behind by"
+]

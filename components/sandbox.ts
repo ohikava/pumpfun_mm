@@ -3,11 +3,12 @@ import { round } from "./utils";
 import { TokenMeta } from "./interfaces";
 import {BUY, SELL} from "./constants";
 import * as fs from 'fs';
+import * as logger from "./logger";
 
 
 
 const SOL_AMOUNT = 100;
-const TOKEN_AMOUNT = 1_000_000;
+const TOKEN_AMOUNT = 1_000_000_000;
 const DECIMALS = 6;
 
 export class Sandbox {
@@ -35,6 +36,9 @@ export class Sandbox {
     }
 
     public getSolBalance(address: string) {
+        if (!(address in this.solBalances)) {
+            this.solBalances[address] = 0;
+        }
         return this.solBalances[address];
     }
 
@@ -42,7 +46,7 @@ export class Sandbox {
         return {
             "virtual_sol_reserves": this.solPool,
             "virtual_token_reserves": this.tokenPool,
-            "total_supply": this.totalSupply
+            "total_supply": this.totalSupply * DECIMALS
         }
     }
     public getBalance(address: string) {
@@ -52,14 +56,14 @@ export class Sandbox {
         return this.balances[address];
     }
     private addToTXFile(msg: string) {
-        fs.appendFile("sandbox.jsonl", msg, (err) => {
+        fs.appendFile("sandbox.jsonl", msg + "\n", (err) => {
             if (err) {
                 console.error('ошибка при записи в файл:', err);
             } else {
             }
         });
     }
-    public buy(address: string, amount: number): boolean {
+    public buy(address: string, amount: number, rank: string): boolean {
         try {
             const price = this.tokenPool / this.solPool;
             const amountInLamports = LAMPORTS_PER_SOL * amount;
@@ -83,16 +87,18 @@ export class Sandbox {
                 "tokenPool": this.tokenPool,
                 "solPool": this.solPool,
                 "solBalance": this.solBalances[address],
-                "tokenBalance": this.balances[address]
+                "tokenBalance": this.balances[address],
+                "rank": rank 
             }
             this.addToTXFile(JSON.stringify(tsMsg));
+            logger.info(`${address.slice(0, 5)} BUY ${amount} SOL RANK ${rank}`);
             return true;
         } catch {
             return false;
         }
     }
 
-    public sell(address: string, tokenAmount: number): boolean {
+    public sell(address: string, tokenAmount: number, rank: string): boolean {
         try {
             const price = this.tokenPool / this.solPool;
 
@@ -103,6 +109,8 @@ export class Sandbox {
             const initialBalance = this.getSolBalance(address);
             this.setSolBalance(address, initialBalance + solAmount)
 
+            this.balances[address] -= tokenAmount;
+
             const tsMsg = {
                 "type": SELL,
                 "wallet": address,
@@ -111,9 +119,11 @@ export class Sandbox {
                 "tokenPool": this.tokenPool,
                 "solPool": this.solPool,
                 "solBalance": this.solBalances[address],
-                "tokenBalance": this.balances[address]
+                "tokenBalance": this.balances[address],
+                "rank": rank
             }
             this.addToTXFile(JSON.stringify(tsMsg));
+            logger.info(`${address.slice(0, 5)} SELL ${solAmount/10**9} SOL RANK ${rank}`);
 
             return true;
         } catch {
@@ -133,3 +143,4 @@ export class Sandbox {
         this.isRunning = newIsRunning;
     }
 }
+// console.log("hello world")
