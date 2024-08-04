@@ -85,6 +85,16 @@ logger.setLevel("DEBUG");
         })()
       });
     
+    app.get("/getlastwalletbalance", (req: Request, res: Response) => {
+        mm.getLastWalletBalance();
+        res.send("getting last wallet balance")
+      });
+    
+    app.get("/selllastwallet", (req: Request, res: Response) => {
+        mm.sellLastWallet();
+        res.send("selling last wallet")
+      });
+      
     app.post("/reloadconfig", (req: Request, res: Response) => {
       let cloneConfig: Config = {...mm.config};
 
@@ -120,6 +130,12 @@ logger.setLevel("DEBUG");
       mm.rebalanceWallets();
       res.send("rebalancing has started!")
     })
+
+    app.get("/transfertokens", (req: Request, res: Response) => {
+      mm.transferTokens();
+      
+      res.send("tokens has been transferred!")
+  })
     app.listen(3000, () => {
         console.log(`Server running at http://localhost:${3000}`);
     });

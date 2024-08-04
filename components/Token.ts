@@ -66,11 +66,11 @@ export class Token {
 
 
     public async checkIfTokenAccountExist(
-        wallet: Keypair,
+        wallet: PublicKey,
     ): Promise<[Boolean, PublicKey]> {
         const associatedTokenAddress = await getAssociatedTokenAddress(
             this.mint, 
-            wallet.publicKey
+            wallet
         );
         const accountInfo = await this.connection.getAccountInfo(associatedTokenAddress);
         if (accountInfo == null) {

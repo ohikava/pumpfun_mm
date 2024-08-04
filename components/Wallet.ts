@@ -1,6 +1,6 @@
 import bs58 from 'bs58'
 import {Keypair, 
-        VersionedTransaction, 
+        VersionedTransaction,
         TransactionInstruction, 
         Transaction, 
         SystemProgram,
@@ -8,6 +8,7 @@ import {Keypair,
         LAMPORTS_PER_SOL, 
         PublicKey, 
         ComputeBudgetProgram,
+        sendAndConfirmTransaction,
         TransactionMessage} from "@solana/web3.js";
 import {GLOBAL, 
         FEE_RECIPIENT, 
@@ -23,12 +24,20 @@ import {GLOBAL,
         SENDING_ERRORS
     } from "./constants";
 
+import {
+        createMint,
+        getOrCreateAssociatedTokenAccount,
+        mintTo,
+        createTransferInstruction,
+    } from "@solana/spl-token";
+
+
 import {bufferFromUInt64, formatError, round} from "./utils"
 
 import { Token } from './Token';
 import { ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import * as logger from "./logger";
-import {Config} from "./interfaces";
+import {Config, CreateTxOutput} from "./interfaces";
 
 export class Wallet {
     private keypair: Keypair;
@@ -61,17 +70,21 @@ export class Wallet {
         await this.getTokenBalance()
     }
 
-    public async getBuyTx(solIn: number, slippageDecimal: number): Promise<VersionedTransaction|boolean>{
+    public async getBuyTx(solIn: number, slippageDecimal: number): Promise<CreateTxOutput>{
         const coinData = await this.token.getTokenMeta()
 
         if (!coinData) {
             logger.error("Failed to retrieve coin data...");
-            return false;
+            return {
+                "isSuccess": false,
+                "outputAmount": 0,
+                "tx": undefined
+            }
         }
 
         let tokenAccountInstructions: TransactionInstruction[] = [];
 
-        const [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair)
+        const [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair.publicKey)
 
         if (!isTokenAccountExist) {
             const ata = this.token.getCreateTokenAccountInstruction(this.keypair, tokenAccount);
@@ -138,11 +151,15 @@ export class Wallet {
 
         const transaction = new VersionedTransaction(compiledMessage);
         transaction.sign([this.keypair]);
-        return transaction
+        return {
+            "isSuccess": true,
+            "outputAmount": tokenOut,
+            "tx": transaction
+        }
     }
 
     public async buy(solIn: number, slippageDecimal: number) {
-        let tx, txId, errMsg;
+        let txInfo, txId, errMsg;
         let tries = 0;
         let shouldContinueSending = true;
 
@@ -152,10 +169,13 @@ export class Wallet {
         
         while (shouldContinueSending) {
             try {
-                tx = await this.getBuyTx(solIn, slippageDecimal);
-                if (tx) {
-                    txId = await this.connection.sendTransaction(tx);
+                txInfo = await this.getBuyTx(solIn, slippageDecimal);
+
+                if (txInfo['isSuccess']) {
+                    
+                    txId = await this.connection.sendTransaction(txInfo['tx']);
                     logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} BUY ${round(solIn, 3)} SOL. tx: ${txId}`);
+
                     return true;
                 }
                 return false;
@@ -182,19 +202,23 @@ export class Wallet {
             }
         }
     }
-    public async getSellTx(tokenOut: number, slippageDecimal: number): Promise<VersionedTransaction|boolean> {
+    public async getSellTx(tokenOut: number, slippageDecimal: number): Promise<CreateTxOutput> {
         const coinData = await this.token.getTokenMeta()
 
         if (!coinData) {
             logger.error("Failed to retrieve coin data...");
-            return false;
+            return {
+                "isSuccess": false,
+                "outputAmount": 0,
+                "tx": undefined
+            }
         }
 
         let tokenAccountInstructions: TransactionInstruction[] = [];
         let tokenAccount: PublicKey;
         let isTokenAccountExist: Boolean;
         if (!this.tokenAccountAddress) {
-            [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair);
+            [isTokenAccountExist, tokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair.publicKey);
         } else {
             tokenAccount = this.tokenAccountAddress;
         }
@@ -260,11 +284,15 @@ export class Wallet {
 
         const transaction = new VersionedTransaction(compiledMessage);
         transaction.sign([this.keypair]);
-        return transaction;
+        return {
+            "isSuccess": true,
+            "outputAmount": minSolOutput,
+            "tx": transaction
+        }
     }
 
     public async sell(tokenOut: number, slippageDecimal: number) {
-        let tx, txId, errMsg;
+        let txInfo, txId, errMsg;
         let tries = 0;
         let shouldContinueSending = true;
 
@@ -274,10 +302,11 @@ export class Wallet {
         
         while (shouldContinueSending) {
             try {
-                tx = await this.getSellTx(tokenOut, this.config.slippage)
-                if (tx) {
-                    txId = await this.connection.sendTransaction(tx);
+                txInfo = await this.getSellTx(tokenOut, this.config.slippage)
+                if (txInfo['isSuccess']) {
+                    txId = await this.connection.sendTransaction(txInfo['tx']);
                     logger.info(`${this.keypair.publicKey.toString().slice(0, 5)} SELL ${round(tokenOut, 0)}. tx: ${txId}`);
+
                     return true;
                 }
                 return false;
@@ -308,7 +337,7 @@ export class Wallet {
     public async getTokenAccountInfo() {
         var _: Boolean;
         if (!this.tokenAccountAddress) {
-            [_, this.tokenAccountAddress] = await this.token.checkIfTokenAccountExist(this.keypair);
+            [_, this.tokenAccountAddress] = await this.token.checkIfTokenAccountExist(this.keypair.publicKey);
         }
         const accountInfo = await this.connection.getParsedAccountInfo(this.tokenAccountAddress);
         return accountInfo;
@@ -390,4 +419,56 @@ export class Wallet {
         }
 
     }
+
+    public async transferTokens(to: PublicKey, amount: number): Promise<boolean> {
+        try {
+            let senderTokenAccount: PublicKey;
+            let receiverTokenAccount: PublicKey;
+            let isTokenAccountExist: Boolean;
+            let ata;
+            if (!this.tokenAccountAddress) {
+                [isTokenAccountExist, senderTokenAccount] = await this.token.checkIfTokenAccountExist(this.keypair.publicKey);
+            } else {
+                senderTokenAccount = this.tokenAccountAddress;
+            }
+
+            [isTokenAccountExist, receiverTokenAccount] = await this.token.checkIfTokenAccountExist(to);
+
+            const tokenAccountInstructions: TransactionInstruction[] = [];
+            if (!isTokenAccountExist) {
+                ata = this.token.getCreateTokenAccountInstruction(this.keypair, receiverTokenAccount);
+                tokenAccountInstructions.push(...ata.instructions);
+            }
+            const budgetUsageInstructions = [
+                ComputeBudgetProgram.setComputeUnitPrice({"microLamports": this.config['unitPrice']}),
+                ComputeBudgetProgram.setComputeUnitLimit({"units": Math.max(this.config['unitBudget'], UNITS_BUDGET_BUY)})
+            ]
+
+            const transactions = [
+                ...budgetUsageInstructions,
+                ...tokenAccountInstructions,
+                createTransferInstruction(
+                    senderTokenAccount,
+                    receiverTokenAccount,
+                    this.keypair.publicKey,
+                    this.tokenBalance*10**this.token.decimals,
+                ),
+            ]
+            const transaction = new Transaction().add(...transactions);
+             
+            await this.connection.sendTransaction(transaction, [this.keypair]);
+
+            return true;
+            
+        } catch (e: unknown) {
+            if (typeof e === "string") {
+                logger.error(`${this.getPublicKey()} transfer ${amount} tokens to ${to.toString()}`)
+                logger.error(e.toUpperCase())// works, `e` narrowed to string
+            } else if (e instanceof Error) {
+                logger.error(`${this.getPublicKey()} transfer ${amount} tokens to ${to.toString()}`)
+                logger.error(e.message)// works, `e` narrowed to Error
+            }
+            return false; 
+        }
+    } 
 }

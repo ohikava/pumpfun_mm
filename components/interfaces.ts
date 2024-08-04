@@ -1,3 +1,4 @@
+import { VersionedTransaction } from "@solana/web3.js"
 import { RANKS } from "./constants"
 
 export interface Config {
@@ -16,7 +17,8 @@ export interface Config {
     rpcSendTxSleep: number,
     simulation: boolean,
     errorSleep: number,
-    errorMaxTries: number
+    errorMaxTries: number,
+    updateBalanceSleep: number
 }
 
 export interface StatisticItem {
@@ -33,4 +35,10 @@ export interface TokenMeta {
 export interface DispatchConf {
     solBalance: number,
     rank: RANKS
+}
+
+export interface CreateTxOutput {
+    tx: VersionedTransaction|undefined,
+    isSuccess: boolean,
+    outputAmount: number
 }

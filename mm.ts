@@ -185,6 +185,12 @@ export class MM {
                     totalSolSum += balance;
                 }
 
+                if (updateBalance) {
+                    currentWallet.getSolBalance()
+                    currentWallet.getTokenBalance()
+                    await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
+                }
+
             } else if (currentWallet.nextTxType == SELL) {
                 sellAmount += 1;
 
@@ -229,7 +235,7 @@ export class MM {
         }
 
         if ((updateBalance) && (walletsList.length > 0)) {
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, this.config['updateBalanceSleep']));
 
             for (let i = 0; i < walletsList.length; i +=1) {
 
@@ -482,6 +488,46 @@ export class MM {
         });
 
 
+    }
+
+
+    public async getLastWalletBalance() {
+        let lastWallet = this.wallets[this.wallets.length - 1];
+        await lastWallet.getSolBalance();
+        await lastWallet.getTokenBalance();
+        logger.info(`last wallet balance: ${lastWallet.balance / LAMPORTS_PER_SOL} SOL, token balance: ${lastWallet.tokenBalance} tokens`)
+    }
+
+    public async sellLastWallet() {
+        let lastWallet = this.wallets[this.wallets.length - 1];
+        await lastWallet.getTokenBalance();
+        await lastWallet.sell(lastWallet.tokenBalance, this.config.slippage);
+    }
+
+
+    public async transferTokens() {
+        let currentWallet;
+        let isSuccess;
+        let successCount = 0;
+        const toKey = new PublicKey(this.wallets[this.wallets.length-1].getPublicKey());
+        for (let i = 0; i < this.wallets.length-1; i++) {
+            currentWallet = this.wallets[i];
+            await currentWallet.getTokenBalance();
+
+            if (currentWallet.tokenBalance <= 10) {
+                await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
+            }
+            isSuccess = await currentWallet.transferTokens(toKey, currentWallet.tokenBalance);
+
+            if (isSuccess) {
+                successCount += 1;
+                logger.info(`transfered ${currentWallet.tokenBalance} tokens from ${currentWallet.getPublicKey()} to ${toKey.toString()}`)
+            }
+
+            await new Promise(resolve => setTimeout(resolve, this.config.rpcSendTxSleep));
+        }
+
+        logger.info(`success rate: ${successCount}/${this.wallets.length}`)
     }
 
     public async rebalanceWallets(rebalanceConfPath: string = "rebalance_conf.json") {
