@@ -8,8 +8,9 @@ import { Config } from "./components/interfaces";
 logger.setLevel("DEBUG");
 
 (async () => {
-    const config: Config = await readJson(CONFIG_PATH);
+    const config: Config = readJson(CONFIG_PATH);
     const mm = new MM(config)
+    await mm.init()
 
     const app = express();
     app.use(express.json());
@@ -45,7 +46,11 @@ logger.setLevel("DEBUG");
         mm.getAllBalance();
         res.send("show balance");
       });
-    
+      app.get('/getgasprice', (req: Request, res: Response) => {
+        mm.getGasPrice();
+        res.send(`gas price`);
+      });
+      
       app.get('/buyamountinsol/:solamount', (req: Request, res: Response) => {
         let randomTx = false;
         if ("randomTx" in req.query) {
@@ -79,7 +84,7 @@ logger.setLevel("DEBUG");
     
     app.get("/reloadconfigfile", (req: Request, res: Response) => {
         (async () => {
-            const newconfig = await readJson(CONFIG_PATH);
+            const newconfig = readJson(CONFIG_PATH);
             mm.reloadConfig(newconfig);
             res.send("reloading has ended")
         })()
@@ -97,10 +102,10 @@ logger.setLevel("DEBUG");
       
     app.post("/reloadconfig", (req: Request, res: Response) => {
       let cloneConfig: Config = {...mm.config};
-
+      
       for (let key in cloneConfig) {
         if (key in req.body) {
-          cloneConfig[key] = req.body[key];
+          cloneConfig[key as keyof Config] = req.body[key as keyof Config];
         }
       }
       mm.reloadConfig(cloneConfig);
@@ -110,32 +115,24 @@ logger.setLevel("DEBUG");
     app.get("/getconfig", (req: Request, res: Response) => {
         res.send(mm.config);
     })
-    
-    app.get("/withdrawall/:address", (req: Request, res: Response) => {
-        mm.withdrawall(req.params['address'])
-        res.send('withdraw');
-    })
 
-    app.get("/saveonlydispatchedwallets", (req: Request, res: Response) => {
-      mm.savePKOnlyFromConf()
-      res.send('saved');
-  })
 
     app.get("/savestatistic", (req: Request, res: Response) => {
       mm.saveStatistic()
       res.send("statistic has been saved!")
 })
 
-    app.get("/rebalance", (req: Request, res: Response) => {
-      mm.rebalanceWallets();
-      res.send("rebalancing has started!")
-    })
-
     app.get("/transfertokens", (req: Request, res: Response) => {
       mm.transferTokens();
       
       res.send("tokens has been transferred!")
   })
+
+    app.get("/startslowselling", (req: Request, res: Response) => {
+      mm.startSlowSelling();
+      res.send("slow selling has been started!")
+    })
+
     app.listen(3000, () => {
         console.log(`Server running at http://localhost:${3000}`);
     });

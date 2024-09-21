@@ -1,146 +1,88 @@
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { round } from "./utils";
-import { TokenMeta } from "./interfaces";
-import {BUY, SELL} from "./constants";
-import * as fs from 'fs';
-import * as logger from "./logger";
-
-
-
-const SOL_AMOUNT = 100;
-const TOKEN_AMOUNT = 1_000_000_000;
-const DECIMALS = 6;
-
-export class Sandbox {
-    private solPool: number;
-    private tokenPool: number;
-    private balances: {[key: string]: number};
-    private solBalances: {[key: string]: number};
+export class UniswapAMMSimulator {
+    private tokenSupply: number;
+    private pooledEthLiquidity: number;
     private decimals: number;
+    private tokenBalance: number;
+    private ethBalance: number;
+    private tokenHoldings: Map<string, number>;
+    private ethHoldings: Map<string, number>;
     public isRunning: boolean;
-    private totalSupply: number;
+    
 
-    public constructor() {
-        this.solPool = SOL_AMOUNT * LAMPORTS_PER_SOL;
-        this.tokenPool = TOKEN_AMOUNT;
-        this.balances = {};
-        this.solBalances = {};
-        this.decimals = DECIMALS;
-        this.isRunning = true;
-        this.totalSupply = TOKEN_AMOUNT;
+    constructor(tokenSupply: number, pooledEthLiquidity: number, decimals: number) {
+        this.tokenSupply = tokenSupply;
+        this.pooledEthLiquidity = pooledEthLiquidity;
+        this.decimals = decimals;
+        this.tokenBalance = tokenSupply;
+        this.ethBalance = pooledEthLiquidity;
+        this.tokenHoldings = new Map<string, number>();
+        this.ethHoldings = new Map<string, number>();
+        this.isRunning = false;
+        
     }
 
-
-    public setSolBalance(address: string, amount: number) {
-        this.solBalances[address] = amount;
+    public setIsRunning(isRunning: boolean) {
+        this.isRunning = isRunning;
     }
 
-    public getSolBalance(address: string) {
-        if (!(address in this.solBalances)) {
-            this.solBalances[address] = 0;
+    public buy(buyerPublicKey: string, minTokenOutput: number, ethInput: number, fee: number): void {
+        const tokenOutput = this.getTokenOutputForEthInput(ethInput);
+
+        if (tokenOutput < minTokenOutput) {
+            throw new Error("Slippage too high");
         }
-        return this.solBalances[address];
+
+        const ethWithFee = ethInput + fee;
+
+        // Update pool state
+        this.tokenBalance -= tokenOutput;
+        this.ethBalance += ethInput;
+
+        // Update mappings
+        this.updateHoldings(this.tokenHoldings, buyerPublicKey, tokenOutput);
+        this.updateHoldings(this.ethHoldings, buyerPublicKey, -ethWithFee);
     }
 
-    public getTokenMeta(): TokenMeta{
+    public sell(sellerPublicKey: string, tokenInput: number, minEthOutput: number, fee: number): void {
+
+        const ethOutputWithFee = minEthOutput - fee;
+
+        // Update pool state
+        this.tokenBalance += tokenInput;
+        this.ethBalance -= ethOutputWithFee;
+
+        // Update mappings
+        this.updateHoldings(this.tokenHoldings, sellerPublicKey, -tokenInput);
+        this.updateHoldings(this.ethHoldings, sellerPublicKey, ethOutputWithFee);
+    }
+
+    public getPoolState(): { tokenBalance: number; ethBalance: number } {
         return {
-            "virtual_sol_reserves": this.solPool,
-            "virtual_token_reserves": this.tokenPool,
-            "total_supply": this.totalSupply * DECIMALS
-        }
-    }
-    public getBalance(address: string) {
-        if (!(address in this.balances)) {
-            return 0;
-        }
-        return this.balances[address];
-    }
-    private addToTXFile(msg: string) {
-        fs.appendFile("sandbox.jsonl", msg + "\n", (err) => {
-            if (err) {
-                console.error('ошибка при записи в файл:', err);
-            } else {
-            }
-        });
-    }
-    public buy(address: string, amount: number, rank: string): boolean {
-        try {
-            const price = this.tokenPool / this.solPool;
-            const amountInLamports = LAMPORTS_PER_SOL * amount;
-            const tokenAmount = round(price * amountInLamports, this.decimals);
-            this.tokenPool -= tokenAmount;
-            this.solPool += amountInLamports;
-
-            if (address in this.balances) {
-                this.balances[address] += tokenAmount;
-            } else {
-                this.balances[address] = tokenAmount;
-            }
-            const initialBalance = this.getSolBalance(address);
-            this.setSolBalance(address, initialBalance - amountInLamports)
-
-            const tsMsg = {
-                "type": BUY,
-                "wallet": address,
-                "amount": amountInLamports,
-                "tokenAmount": tokenAmount,
-                "tokenPool": this.tokenPool,
-                "solPool": this.solPool,
-                "solBalance": this.solBalances[address],
-                "tokenBalance": this.balances[address],
-                "rank": rank 
-            }
-            this.addToTXFile(JSON.stringify(tsMsg));
-            logger.info(`${address.slice(0, 5)} BUY ${amount} SOL RANK ${rank}`);
-            return true;
-        } catch {
-            return false;
-        }
+            tokenBalance: this.tokenBalance,
+            ethBalance: this.ethBalance
+        };
     }
 
-    public sell(address: string, tokenAmount: number, rank: string): boolean {
-        try {
-            const price = this.tokenPool / this.solPool;
 
-            const solAmount = round(tokenAmount / price, 0);
-            this.tokenPool += tokenAmount;
-            this.solPool -= solAmount;
-
-            const initialBalance = this.getSolBalance(address);
-            this.setSolBalance(address, initialBalance + solAmount)
-
-            this.balances[address] -= tokenAmount;
-
-            const tsMsg = {
-                "type": SELL,
-                "wallet": address,
-                "amount": solAmount,
-                "tokenAmount": tokenAmount,
-                "tokenPool": this.tokenPool,
-                "solPool": this.solPool,
-                "solBalance": this.solBalances[address],
-                "tokenBalance": this.balances[address],
-                "rank": rank
-            }
-            this.addToTXFile(JSON.stringify(tsMsg));
-            logger.info(`${address.slice(0, 5)} SELL ${solAmount/10**9} SOL RANK ${rank}`);
-
-            return true;
-        } catch {
-            return false;
-        }
+    public getTokenOutputForEthInput(ethInput: number): number {
+        const k = this.tokenBalance * this.ethBalance;
+        return this.tokenBalance - (k / (this.ethBalance + ethInput));
     }
 
-    public getHolders() {
-        return this.balances;
+    public getEthOutputForTokenInput(tokenInput: number): number {
+        const k = this.tokenBalance * this.ethBalance;
+        return this.ethBalance - (k / (this.tokenBalance + tokenInput));
     }
 
-    public getDecimals() {
-        return this.decimals;
+    private updateHoldings(holdings: Map<string, number>, publicKey: string, amount: number): void {
+        const currentHolding = holdings.get(publicKey) || 0;
+        holdings.set(publicKey, currentHolding + amount);
     }
 
-    public setIsRunning(newIsRunning: boolean) {
-        this.isRunning = newIsRunning;
+    public getAddressHoldings(publicKey: string): { tokenBalance: number; ethBalance: number } {
+        return {
+            tokenBalance: this.tokenHoldings.get(publicKey) || 0,
+            ethBalance: this.ethHoldings.get(publicKey) || 0
+        };
     }
 }
-// console.log("hello world")

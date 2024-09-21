@@ -1,74 +1,81 @@
 // MainApp.ts
 import { Wallet } from './components/Wallet';
-import {getRandomDecimalInRange, round, getRandomIntInRange, shuffle, readJson} from "./components/utils";
+import {getRandomDecimalInRange, round, getRandomIntInRange, shuffle, convertUSDC2ETH, sortWalletsByTokenBalance, sortWalletsByBalance} from "./components/utils";
 import * as fs from 'fs';
 import * as path from 'path';
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import { BUY, SELL } from './components/constants';
 import {Token} from "./components/Token";
-import {BASE_FEE, NUM_SIGNATURES, MICROLAMPORTS_PER_LAMPORT, UNITS_BUDGET_BUY, UNITS_BUDGET_SELL, BUY, SELL, RANKS, RANKS_IN_ORDER} from "./components/constants";
 import * as logger from "./components/logger";
 import bs58 from 'bs58'
-import { Config, StatisticItem, DispatchConf, TokenMeta } from './components/interfaces';
-import { Sandbox } from './components/sandbox';
+import { Config, StatisticItem, TxOrder } from './components/interfaces';
+import { UniswapAMMSimulator } from './components/sandbox';
+import { log } from 'console';
+import { createPublicClient, createWalletClient, formatGwei, formatUnits, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import { Monitor } from './components/Monitor';
+import { isUndefined } from 'util';
+
 
 export class MM {
     private wallets: Wallet[];
     public mint: Token;
-    private connection: Connection;
+    private provider: any;
     public config: Config;
-    public sb: Sandbox;
-    public totalSolBalance: number;
+    public sb: UniswapAMMSimulator;
+    public totalBalance: number;
     public totalTokenBalance: number;
+    public monitor: Monitor | undefined;
 
 
     constructor(config: Config) {
         this.config = config;
         this.wallets = [];
-        this.connection = new Connection(config.RPC)
+        this.provider = createPublicClient({
+            chain: mainnet,
+            transport: http(this.config.RPC),
+          });
 
-        this.sb = new Sandbox();
+        this.sb = new UniswapAMMSimulator(1000000000000000000, 100, 18);
         this.sb.setIsRunning(this.config.simulation)
 
-        this.mint = new Token(config.CA, this.connection, this.sb);
+        this.mint = new Token(config.CA, this.provider, this.sb, this.config);
 
-        this.totalSolBalance = 0;
+        this.totalBalance = 0;
         this.totalTokenBalance = 0;
+    }
+
+    public async init() {
+        await this.mint.init();
+        this.monitor = new Monitor(this.provider, this.mint.pairAddress, this.config);
+        await this.monitor.init();
     }
 
     public reloadConfig(newConfig: Config) {
         logger.info("reloading...")
         this.config = newConfig;
-        this.connection = new Connection(newConfig.RPC);
+        this.provider = createPublicClient({
+            chain: mainnet,
+            transport: http(this.config.RPC),
+        })
         this.sb.setIsRunning(this.config.simulation);
-        this.mint = new Token(newConfig.CA, this.connection, this.sb);
+        this.mint = new Token(newConfig.CA, this.provider, this.sb, this.config);
     };
-    // Method to read private keys from a file and create wallets
-    public async createWalletsFromFile(filePath: string, dispatchConfPath: string): Promise<void> {
-        try {
-            const data = fs.readFileSync(path.resolve(filePath), 'utf-8');
-            const keys = data.split('\n').filter(line => line.trim() !== '');
-            
-            const dispatchConf: {[key: string]: DispatchConf} = await readJson(dispatchConfPath);
 
-            for (let i in dispatchConf) {
-                this.sb.setSolBalance(i, dispatchConf[i]['solBalance'] * LAMPORTS_PER_SOL);
-            }
-            
+    public async createWalletsFromFile(filePath: string) {
+        try {
+            const data = fs.readFileSync(filePath, 'utf-8');
+            const keys = data.split('\n').filter(line => line.trim() !== '');
+
             let privateKey: string;
             for (let i = 0; i < keys.length; i++) {
                 privateKey = keys[i];
-                const wallet = new Wallet(privateKey.trim(), this.mint, this.connection, this.config);
+                const wallet = new Wallet(privateKey.trim(), this.mint, this.provider, this.config);
                 await wallet.init()
 
-                this.totalSolBalance += wallet.balance;
-                this.totalTokenBalance += wallet.tokenBalance;
+                this.totalBalance += wallet.balance;
+                this.totalTokenBalance += wallet.tokenBalance;  
 
-                let rank: RANKS = dispatchConf[wallet.getPublicKey()]['rank'];
-
-                if (!rank) {
-                    rank = RANKS.LOW;
-                }
-                wallet.rank = rank;
 
                 this.wallets.push(wallet);
 
@@ -77,56 +84,55 @@ export class MM {
                 await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
 
             }
-            logger.info(`cum sol balance: ${round(this.totalSolBalance / LAMPORTS_PER_SOL, 4)}, cum token balance: ${round(this.totalTokenBalance, 0)}, percentage of supply: ${round(this.totalTokenBalance / this.mint.getTotalSupply() * 100, 3)}%`);
 
+            logger.info(`cum ETH balance: ${round(this.totalBalance, 4)}, cum token balance: ${round(this.totalTokenBalance, 0)}`);
 
         } catch (error: any) {
             logger.error(`error reading file: ${error.message}`);
         }
     }
-    public calculateTransactionFee() {
-         const buyFee= (BASE_FEE * NUM_SIGNATURES + Math.max(UNITS_BUDGET_BUY, this.config['unitBudget']) * this.config['unitPrice']) / MICROLAMPORTS_PER_LAMPORT / LAMPORTS_PER_SOL;
-         const sellFee= (BASE_FEE * NUM_SIGNATURES + Math.max(UNITS_BUDGET_SELL, this.config['unitBudget']) * this.config['unitPrice']) / MICROLAMPORTS_PER_LAMPORT / LAMPORTS_PER_SOL;
-        
-         logger.info(`buy fee: ${buyFee} SOL`)
-         logger.info(`sell fee: ${sellFee} SOL`)
 
-    };
-
+    
     // Method to get all wallets
     public getWallets(): Wallet[] {
         return this.wallets;
     }
 
     public async getAllBalance() {
-        this.totalSolBalance = 0;
+        this.totalBalance = 0;
         this.totalTokenBalance = 0;
 
         for (const wallet of this.getWallets()) {
             await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
-            logger.info(`public key: ${wallet.getPublicKey()}`);
+            logger.info(`public key: ${await wallet.getPublicKey()}`);
             try {
-                await wallet.getSolBalance()
+                await wallet.getBalance()
                 await wallet.getTokenBalance()
 
                 let balance = wallet.balance;
-                logger.info(`balance: ${balance / LAMPORTS_PER_SOL} SOL`);
+                logger.info(`balance: ${balance} ETH`);
                 logger.info(`token balance: ${wallet.tokenBalance} tokens`)
-                this.totalSolBalance += balance;
+                this.totalBalance += balance;
                 this.totalTokenBalance += wallet.tokenBalance;
                 
             } catch (err: any) {
                 logger.info(`error: ${err.message}`)
             }
         }
-        logger.info(`cum sol balance: ${round(this.totalSolBalance / LAMPORTS_PER_SOL, 4)}, cum token balance: ${round(this.totalTokenBalance, 0)}, percentage of supply: ${round(this.totalTokenBalance / this.mint.getTotalSupply() * 100, 3)}%`);
+        logger.info(`cum ETH balance: ${round(this.totalBalance, 4)}, cum token balance: ${round(this.totalTokenBalance, 0)}`);
     }
 
     public async buyFromAll() {
+        const txOrders: TxOrder[] = [];
         for (let i = 0; i < this.wallets.length; i++) {
-            this.wallets[i].nextTxType = BUY;
+            txOrders.push({
+                wallet: this.wallets[i],
+                amount: round(this.wallets[i].balance - this.config['leaveOnFee'], 3),
+                txType: BUY
+            });
+        
         }
-        await this.sendTxFromList(this.wallets, true, true);
+        await this.sendTxFromList(txOrders, true, true);
     }
 
     public async saveStatistic(statisticPath: string = "statistic.json") {
@@ -136,7 +142,7 @@ export class MM {
             curr = this.wallets[i];
             pk = curr.getPublicKey();
             res[pk] = {
-                "solBalance": curr.balance / LAMPORTS_PER_SOL,
+                "solBalance": curr.balance,
                 "tokenBalance": curr.tokenBalance
             }
         }
@@ -150,70 +156,78 @@ export class MM {
         
     }
 
-    public async sendTxFromList(walletsList: Wallet[], updateBalance=true, randomSleepTime=true) {
+    public async sendTxFromList(txOrders: TxOrder[], updateBalance=true, randomSleepTime=true) {
         let successBuyCount = 0;
         let successSellCount = 0;
         let buyAmount = 0;
         let sellAmount = 0;
 
-        let totalSolSum = 0;
+        let totalEthSum = 0;
         let totalTokenSum = 0;
 
         let currentWallet;
         let balance;
         let tokenBalance;
         let isSuccess;
+        let tx;
+        let amount;
+        let txType;
 
-        for (let i = 0; i < walletsList.length; i++) {
-            currentWallet = walletsList[i];
-            
-            if (currentWallet.nextTxType == BUY) {
+        for (let i = 0; i < txOrders.length; i++) {
+            currentWallet = txOrders[i].wallet;
+            amount = txOrders[i].amount;
+            txType = txOrders[i].txType;
+
+            const gasPrice = await this.mint.getGasPrice();
+            const gasPriceGwei = Number.parseFloat(formatGwei(gasPrice));
+            if (gasPriceGwei > this.config.gasPriceLimitGwei) {
+                logger.info(`gas price is too high, skipping tx`)
+                continue
+            }
+
+            if (txType == BUY) {
+                balance = currentWallet.balance;
+
                 buyAmount += 1;
-                // check sol balance
-                balance = walletsList[i].balance / LAMPORTS_PER_SOL - this.config['leaveOnFeeSol'];
-                balance = round(balance, 3);
+            
 
-                if ((balance) <= 0) {
-                    // logger.error(`${currentWallet.getPublicKey().slice(0, 5)}} insufficient sol balance for buy: ${round(walletsList[i].balance / LAMPORTS_PER_SOL, 3)}`)
+                if (balance <= amount) {
                     continue
                 }
 
-                isSuccess = await currentWallet.buy(balance, this.config.slippage);
+                [isSuccess, tx] = await currentWallet.buy(amount.toString(), this.config.slippage, gasPrice);
                 
                 if (isSuccess) {
                     successBuyCount += 1;
-                    totalSolSum += balance;
+                    totalEthSum += amount;
+                    logger.info(`BUY ${currentWallet.getPublicKey().slice(0, 5)} ${amount} ETH, tx: ${tx}`)
                 }
 
-                if (updateBalance) {
-                    currentWallet.getSolBalance()
-                    currentWallet.getTokenBalance()
-                    await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
-                }
-
-            } else if (currentWallet.nextTxType == SELL) {
+            } else if (txType == SELL) {
                 sellAmount += 1;
+                tokenBalance = currentWallet.tokenBalance;
 
-                // check balance of the wallet
+                
+
                 if (currentWallet.tokenBalance > 0) {
                     tokenBalance= currentWallet.tokenBalance;
                 } else {
-                    tokenBalance = await currentWallet.getTokenAmount();
+                    tokenBalance = await currentWallet.getTokenBalance();
                 }
 
                 if (isNaN(tokenBalance)) {
                     tokenBalance = 0;
                 }
-                if (tokenBalance <= 10) {
-                    // logger.error(`${currentWallet.getPublicKey().slice(0, 5)} insufficient token balance: ${tokenBalance}`)
+                if (tokenBalance <= amount) {
                     continue
                 }
 
-                isSuccess = await currentWallet.sell(tokenBalance-2, this.config.slippage);
+                [isSuccess, tx] = await currentWallet.sell((amount).toString(), this.config.slippage, gasPrice);
 
                 if (isSuccess) {
                     successSellCount += 1;
-                    totalTokenSum += tokenBalance;
+                    totalTokenSum += amount;
+                    logger.info(`SELL ${currentWallet.getPublicKey().slice(0, 5)} ${amount} tokens, tx: ${tx}`)
                 }
 
 
@@ -222,9 +236,7 @@ export class MM {
                 continue 
             }
 
-            currentWallet.nextTxType = "";
-
-            if (!(i == walletsList.length - 1)) {
+            if (!(i == txOrders.length - 1)) {
                 if (randomSleepTime) {
                     const randomWaitTime = getRandomDecimalInRange(this.config.minSleepTime, this.config.maxSleepTime) * 1000;
                     await new Promise(resolve => setTimeout(resolve, randomWaitTime));
@@ -233,51 +245,71 @@ export class MM {
                 }
             }
         }
+        
+        const usedWallets: Set<string> = new Set();
+        const uniqueWallets: Wallet[] = [];
+        for (let i = 0; i < txOrders.length; i++) {
+            const walletAddress = txOrders[i].wallet.getPublicKey();
+            if (!usedWallets.has(walletAddress)) {
+                usedWallets.add(walletAddress);
+                uniqueWallets.push(txOrders[i].wallet);
+            }
+        }
+    
+        if ((updateBalance) && (uniqueWallets.length > 0)) {
+            await new Promise(resolve => setTimeout(resolve, this.config['rpcReqSleep']));
 
-        if ((updateBalance) && (walletsList.length > 0)) {
-            await new Promise(resolve => setTimeout(resolve, this.config['updateBalanceSleep']));
+            for (let i = 0; i < uniqueWallets.length; i +=1) {
 
-            for (let i = 0; i < walletsList.length; i +=1) {
-
-                currentWallet = walletsList[i];
-                await currentWallet.getSolBalance()
+                currentWallet = uniqueWallets[i];
+                await currentWallet.getBalance()
                 await currentWallet.getTokenBalance()
                 await new Promise(resolve => setTimeout(resolve, this.config.rpcReqSleep));
             }
         }
-
-        const tokenMeta: TokenMeta = await this.mint.getTokenMeta();
-        const tokenPrice = tokenMeta['virtual_sol_reserves'] / tokenMeta['virtual_token_reserves'] / LAMPORTS_PER_SOL
-        logger.info(`success buy: ${successBuyCount}/${buyAmount}, sol spend ${totalSolSum}`)
-        logger.info(`success sell: ${successSellCount}/${sellAmount}, sol got ${round(totalTokenSum * tokenPrice * 10**this.mint.decimals, 3)}`)
-
-        if ((updateBalance) && (walletsList.length > 0)) {
-            this.totalSolBalance = 0;
+        const tokenPrice = await this.mint.getTokenPrice();
+        logger.info(`success buy: ${successBuyCount}/${buyAmount}, eth spend ${totalEthSum}}`);
+        logger.info(`success sell: ${successSellCount}/${sellAmount}, eth got ${round(Number(tokenPrice) * totalTokenSum, 3)}`)
+        
+        if ((updateBalance) && (uniqueWallets.length > 0)) {
+            this.totalBalance = 0;
             this.totalTokenBalance = 0;
             for (let i = 0; i < this.wallets.length; i++) {
-                this.totalSolBalance += this.wallets[i].balance;
+                this.totalBalance += this.wallets[i].balance;
                 this.totalTokenBalance += this.wallets[i].tokenBalance;
             }
-            logger.info(`total sol balance: ${this.totalSolBalance / LAMPORTS_PER_SOL}, total token balance: ${this.totalTokenBalance}`);
+            logger.info(`Balance:\n${this.totalBalance} ETH\n${this.totalTokenBalance} tokens`);
         }
 
     }
 
     public async sellFromAll(updateBalance: boolean, randomSleepTime: boolean) {
+        const txOrders: TxOrder[] = [];
         for (let i = 0; i < this.wallets.length; i++) {
-            this.wallets[i].nextTxType = SELL;
+            txOrders.push({
+                wallet: this.wallets[i],
+                amount: this.wallets[i].tokenBalance,
+                txType: SELL
+            })
         }
-        await this.sendTxFromList(this.wallets, updateBalance, randomSleepTime);
+        await this.sendTxFromList(txOrders, updateBalance, randomSleepTime);
     }
 
+    public async getGasPrice() {
+        const gasPriceWei = await this.mint.getGasPrice();
+        const gasPriceGwei = formatUnits(gasPriceWei, 9);
+        logger.info(`gas price: ${gasPriceGwei} gwei`);
+        return gasPriceGwei;
+    }
     public generateWallets(n: number, privatePath: string = "private.txt", publicPath: string = "public.txt"): void {
         const secretKeys = [];
         const publicKeys = []
         for (let i = 0; i < n; i++) {
-            const key = Keypair.generate()
+            const private_key = generatePrivateKey()
 
-            const private_key = bs58.encode(key.secretKey);
-            const public_key = key.publicKey.toString()
+            const wallet = privateKeyToAccount(private_key);
+            const public_key = wallet.address;
+
 
             secretKeys.push(private_key);
             publicKeys.push(public_key);
@@ -310,7 +342,7 @@ export class MM {
         const sellAmountTotal = amountInPercents * totalSupply / 100
         
         let sellAmountReal = 0;
-        const walletsList: Wallet[] = [];
+        const txOrders: TxOrder[] = [];
         let ix = this.wallets.length - 1;
         let wallet: Wallet;
         let realRandomTxAmount = 0;
@@ -324,59 +356,64 @@ export class MM {
                 continue
             }
             sellAmountReal += wallet.tokenBalance;
-            wallet.nextTxType = SELL;
-            walletsList.push(wallet);
+            txOrders.push({
+                wallet: wallet,
+                amount: wallet.tokenBalance,
+                txType: SELL
+            })
             ix -= 1;
         }
-        let sellingWalletsLen = walletsList.length;
+        let sellingWalletsLen = txOrders.length;
         let randomTxAmountInPercents;
         if (randomTx) {
             randomTxAmountInPercents = getRandomIntInRange(this.config.minRandomTxAmountInPercents, this.config.maxRandomTxAmountInPercents);
-            let randomTxAmount = Math.max(round(randomTxAmountInPercents * walletsList.length / 100, 0), 1)
+            let randomTxAmount = Math.max(round(randomTxAmountInPercents * txOrders.length / 100, 0), 1)
 
             ix = 0;
-            let enumType;
 
-            for (let enumIx = 0; enumIx < RANKS_IN_ORDER.length; enumIx++) {
-                enumType = RANKS_IN_ORDER[enumIx];
+            const sortedWallets = sortWalletsByTokenBalance(this.wallets, true)
 
-                while ((randomTxAmount > 0) && (ix < this.wallets.length)) {
-                    wallet = this.wallets[ix];
-                    if ((wallet.tokenBalance <= 100) && (wallet.balance > 0) && (wallet.rank == enumType)) {
-                        wallet.nextTxType = BUY;
-                        walletsList.push(wallet);
-                        randomTxAmount -= 1;
-                        realRandomTxAmount += 1;
-                        realRandomTxSum += wallet.balance;
-                    }
-                    ix +=1 
+            while ((randomTxAmount > 0) && (ix < sortedWallets.length)) {
+                wallet = sortedWallets[ix];
+                if ((wallet.tokenBalance <= 100) && (wallet.balance > 0)) {
+                    txOrders.push({
+                        wallet: wallet,
+                        amount: wallet.balance,
+                        txType: BUY
+                    })
+                    randomTxAmount -= 1;
+                    realRandomTxAmount += 1;
+                    realRandomTxSum += wallet.balance;
                 }
+                ix +=1 
 
                 if (randomTxAmount <= 0) {
                     break;
                 }
             }
 
-            shuffle(walletsList)
+            shuffle(txOrders)
         }
 
-        const tokenMeta: TokenMeta = await this.mint.getTokenMeta()
-        const tokenPrice = tokenMeta['virtual_sol_reserves'] / tokenMeta['virtual_token_reserves'] / LAMPORTS_PER_SOL;
-        logger.info(`selling wallets: ${sellingWalletsLen}, sum: ${round(sellAmountReal * tokenPrice * 10 ** this.mint.decimals, 3)}`)
-        logger.info(`random buying wallets: ${realRandomTxAmount}, sum: ${round(realRandomTxSum / LAMPORTS_PER_SOL, 3)}`)
-        this.sendTxFromList(walletsList, true, true)
+        const tokenPrice = await this.mint.getTokenPrice();
+        
+        // const tokenPrice = tokenMeta['virtual_sol_reserves'] / tokenMeta['virtual_token_reserves'] / LAMPORTS_PER_SOL;
+        logger.info(`selling wallets: ${sellingWalletsLen}, sum: ${round(sellAmountReal * Number(tokenPrice), 3)}`)
+        logger.info(`random buying wallets: ${realRandomTxAmount}, sum: ${round(realRandomTxSum, 3)}`)
+        this.sendTxFromList(txOrders, true, true)
     }
 
     public async buyAmountSol(amountSol: number, randomTx: boolean) {
-        let currentSolSum = 0;
+        console.log(this.wallets)
+        let currentEthSum = 0;
         let ix = 0;
 
-        const walletsList: Wallet[] = [];
+        const txOrders: TxOrder[] = [];
         let wallet;
         let realRandomTxAmount = 0;
         let realRandomTxSum = 0;
 
-        while ((currentSolSum < amountSol) && (ix < this.wallets.length)) {
+        while ((currentEthSum < amountSol) && (ix < this.wallets.length)) {
             wallet = this.wallets[ix];
 
             if (wallet.tokenBalance >= 20) {
@@ -384,124 +421,74 @@ export class MM {
                 continue 
             }
 
-            currentSolSum += round(wallet.balance / LAMPORTS_PER_SOL - this.config['leaveOnFeeSol'], 3)
-            wallet.nextTxType = BUY;
+            currentEthSum += round(wallet.balance - this.config['leaveOnFee'], 3)
+            txOrders.push({
+                wallet: wallet,
+                amount: round(wallet.balance - this.config['leaveOnFee'], 3),
+                txType: BUY
+            });
 
-            walletsList.push(wallet);
             ix += 1;
         }
-        let buyingWalletsLen = walletsList.length;
+        let buyingWalletsLen = txOrders.length;
         if (randomTx) {
             const randomTxAmountInPercents = getRandomIntInRange(this.config.minRandomTxAmountInPercents, this.config.maxRandomTxAmountInPercents);
-            let randomTxAmount = Math.max(round(randomTxAmountInPercents * walletsList.length / 100, 0), 1)
+            let randomTxAmount = Math.max(round(randomTxAmountInPercents * buyingWalletsLen / 100, 0), 1)
 
-            ix = this.wallets.length - 1;
-            let enumType;
-            for (let enumIx = 0; enumIx < RANKS_IN_ORDER.length; enumIx++) {
-                enumType = RANKS_IN_ORDER[enumIx];
-                while ((randomTxAmount > 0) && (ix >= 0)) {
-                    wallet = this.wallets[ix];
+            ix = 0;
+            const sortedWallets = sortWalletsByBalance(this.wallets, true)
 
-                    if ((wallet.tokenBalance >= 20) && (wallet.rank == enumType)) {
-                        wallet.nextTxType = SELL;
-                        walletsList.push(wallet);
-                        randomTxAmount -= 1;
-                        realRandomTxAmount += 1;
-                        realRandomTxSum += wallet.tokenBalance;
-                    }
-                    ix -=1;
+            while ((randomTxAmount > 0) && (ix <= sortedWallets.length)) {
+                wallet = sortedWallets[ix];
+
+                if (wallet.tokenBalance >= 20) {
+                    txOrders.push({
+                        wallet: wallet,
+                        amount: round(wallet.tokenBalance, 3),
+                        txType: SELL
+                    });
+                    randomTxAmount -= 1;
+                    realRandomTxAmount += 1;
+                    realRandomTxSum += wallet.tokenBalance;
                 }
+                ix -=1;
 
                 if (randomTxAmount <= 0) {
-                    break
+                    break;
                 }
             }
 
-            shuffle(walletsList)
         }
 
-        // for (let i = 0; i < walletsList.length; i++) {
-        //     console.log(walletsList[i].nextTxType)
-        // }
-        const tokenMeta: TokenMeta = await this.mint.getTokenMeta();
-        const tokenPrice = tokenMeta['virtual_sol_reserves'] / tokenMeta['virtual_token_reserves'] / LAMPORTS_PER_SOL;
-        logger.info(`buying wallets: ${buyingWalletsLen}, sum: ${round(currentSolSum, 3)}`)
-        logger.info(`random selling wallets: ${realRandomTxAmount}, sum: ${round(realRandomTxSum * tokenPrice * 10**this.mint.decimals, 3)}`)
-        this.sendTxFromList(walletsList, true, true);
+        shuffle(txOrders)
+
+        const tokenPrice = await this.mint.getTokenPrice();
+        logger.info(`buying wallets: ${buyingWalletsLen}, sum: ${round(currentEthSum, 3)}`)
+        logger.info(`random selling wallets: ${realRandomTxAmount}, sum: ${round(realRandomTxSum * Number(tokenPrice), 3)}`)
+        this.sendTxFromList(txOrders, true, true);
     }
 
     public async start() {
         logger.info("start...")
-        await this.mint.getTokenMeta();
-        await this.createWalletsFromFile('wallets.txt', "dispatch_config.json");
-        // await this.printInterface()
+        await this.createWalletsFromFile('wallets.txt');
+        await this.getGasPrice();
     }
 
-    public async withdrawall(address: string) {
-        let currentWallet;
-        let success_rate = 0
-        let successWithdrawList: string[] = [];
-        let isSuccess;
-
-        const addressKey = new PublicKey(address);
-        for (let ix = 0; ix < this.wallets.length; ix++) {
-            currentWallet = this.wallets[ix];
-            
-            isSuccess = await currentWallet.withdrawSOL(addressKey);
-
-            if (!isSuccess) {
-                successWithdrawList.push(currentWallet.getPublicKey())
-            } else {
-                success_rate += 1;
-            }
-            await new Promise(resolve => setTimeout(resolve, this.config.rpcSendTxSleep));
-            
-        }
-
-        logger.info(`success rate: ${success_rate}/${this.wallets.length}`)
-        logger.error(`errors: ${JSON.stringify(successWithdrawList)}`);
-    }
-
-    public async savePKOnlyFromConf(dispatchConfPath: string = "dispatch_config.json", privatePath: string = "wallets.txt", newPrivatePath: string = "wallets_merged.txt") {
-        const dispatchConf = await readJson(dispatchConfPath);
-        const data = fs.readFileSync(path.resolve(privatePath), 'utf-8');
-        const keys = data.split('\n').filter(line => line.trim() !== '');
-        let currWallet: Wallet;
-        const res: string[] = [];
-        
-
-        for (let i = 0; i < this.wallets.length; i++) {
-            currWallet = this.wallets[i];
-
-            if (currWallet.getPublicKey() in dispatchConf) {
-                res.push(keys[i])
-            }
-        }
-
-        let data_row = res.join('\n');
-        fs.writeFile(newPrivatePath, data_row, (err) => {
-            if (err) {
-                console.error('ошибка при записи в файл:', err);
-            } else {
-                console.log(`${res.length} приватный ключей были успешно записанны в ${newPrivatePath}`);
-            }
-        });
-
-
-    }
 
 
     public async getLastWalletBalance() {
         let lastWallet = this.wallets[this.wallets.length - 1];
-        await lastWallet.getSolBalance();
+        await lastWallet.getBalance();
         await lastWallet.getTokenBalance();
-        logger.info(`last wallet balance: ${lastWallet.balance / LAMPORTS_PER_SOL} SOL, token balance: ${lastWallet.tokenBalance} tokens`)
+        logger.info(`last wallet balance:\n${lastWallet.balance} ETH\n${lastWallet.tokenBalance} tokens`)
     }
 
     public async sellLastWallet() {
         let lastWallet = this.wallets[this.wallets.length - 1];
         await lastWallet.getTokenBalance();
-        await lastWallet.sell(lastWallet.tokenBalance, this.config.slippage);
+
+        const gasPrice = await this.mint.getGasPrice()
+        await lastWallet.sell(lastWallet.tokenBalance.toString(), this.config.slippage, gasPrice);
     }
 
 
@@ -509,7 +496,7 @@ export class MM {
         let currentWallet;
         let isSuccess;
         let successCount = 0;
-        const toKey = new PublicKey(this.wallets[this.wallets.length-1].getPublicKey());
+        const toKey = this.wallets[this.wallets.length-1].getPublicKey();
         for (let i = 0; i < this.wallets.length-1; i++) {
             currentWallet = this.wallets[i];
             await currentWallet.getTokenBalance();
@@ -530,48 +517,62 @@ export class MM {
         logger.info(`success rate: ${successCount}/${this.wallets.length}`)
     }
 
-    public async rebalanceWallets(rebalanceConfPath: string = "rebalance_conf.json") {
-        const rebalance_conf = await readJson(rebalanceConfPath);
-        let foundReciever = false;
-        let receiver;
-        let senderPublicKey;
-        let currentWallet;
 
-        for (let key in rebalance_conf) {
-            foundReciever = false;
-            for (let i = 0; i < this.wallets.length; i++) {
-                if (this.wallets[i].getPublicKey() == key) {
-                    foundReciever = true;
-                    receiver = new PublicKey(key);
+    public async startSlowSelling() {
+        const volume = this.monitor.calcTokenVolume();
+
+        if (volume <= 0) {
+            return 
+        }
+
+        const totalSellAmount = volume * this.config['totalSellingLimitPercents'] / 100;
+        const minSellAmount = convertUSDC2ETH(this.config['minSellingAmountUSDC']);
+        const maxSellAmount = convertUSDC2ETH(this.config['maxSellingAmountUSDC']);
+        const txOrders: TxOrder[] = [];
+
+        if (volume) {
+            logger.info(`volume: ${volume}`)
+            
+            let totalTokenSum = 0;
+            const sortedWallets = sortWalletsByTokenBalance(this.wallets, false);
+
+
+            const tokenPrice = Number(await this.mint.getTokenPrice())
+            const minSellAmountTokens = round(minSellAmount / tokenPrice, 0);
+            const maxSellAmountTokens = round(maxSellAmount / tokenPrice, 0);
+            
+            let shouldStop = false;
+            for (let i = 0; i < sortedWallets.length; i++) {
+                const wallet = sortedWallets[i];
+                let walletTokenBalance = wallet.tokenBalance;
+                if (walletTokenBalance < minSellAmountTokens) {
+                    continue 
                 }
-            }
-
-            if (!foundReciever) {
-                logger.error(`receiver ${key} not found!`)
-                continue
-            }
-
-            for (let i = 0; i < rebalance_conf[key].length; i++) {
-                senderPublicKey = rebalance_conf[key][i];
-                currentWallet = undefined;
-                for (let wi = 0; wi < this.wallets.length; wi++) {
-                    if (this.wallets[wi].getPublicKey() == senderPublicKey) {
-                        currentWallet = this.wallets[wi];
-                        break;
+                
+                let randomSum;
+                while (walletTokenBalance > minSellAmountTokens) {
+                    if (totalTokenSum >= totalSellAmount) {
+                        shouldStop = true;
+                        break
                     }
+                    randomSum = getRandomDecimalInRange(minSellAmountTokens, maxSellAmountTokens);
+
+                    txOrders.push({
+                        wallet: wallet,
+                        amount: randomSum,
+                        txType: SELL
+                    });
+
+                    walletTokenBalance -= randomSum;
+                    totalTokenSum += randomSum;
                 }
 
-                if (!currentWallet) {
-                    logger.error(`sender ${senderPublicKey} not found!`)
-                    continue
+                if (shouldStop) {
+                    break;
                 }
-
-                if (receiver) {
-                    currentWallet.withdrawSOL(receiver);
-                    await new Promise(resolve => setTimeout(resolve, this.config.rpcSendTxSleep));
-                }
-
             }
+
+            this.sendTxFromList(txOrders, true, true);
         }
     }
 

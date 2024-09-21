@@ -1,30 +1,22 @@
-import { PublicKey } from "@solana/web3.js";
-export const GLOBAL = new PublicKey("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf");
-export const FEE_RECIPIENT = new PublicKey("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM");
-export const SYSTEM_PROGRAM = new PublicKey("11111111111111111111111111111111");
-export const TOKEN_PROGRAM = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-export const ASSOC_TOKEN_ACC_PROG = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-export const RENT = new PublicKey("SysvarRent111111111111111111111111111111111");
-export const EVENT_AUTHORITY = new PublicKey("Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1");
-export const PUMP_FUN_PROGRAM = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
-export const SOL = "So11111111111111111111111111111111111111112";
-export const LAMPORTS_PER_SOL = 1_000_000_000;
-export const PUMP_FUN_ADDRESS = "https://api.pumpdata.fun";
-export const BASE_FEE = 5000
-export const NUM_SIGNATURES = 1;
-export const UNITS_BUDGET_SELL = 32062;
-export const UNITS_BUDGET_BUY = 36254;
-export const MICROLAMPORTS_PER_LAMPORT = 1_000_000
+import { getAddress, parseAbiItem } from 'viem';
+
 export const CONFIG_PATH = "config.json";
 export const BUY = "BUY";
 export const SELL = "SELL";
-export enum RANKS {
-    LOW = "LOW",
-    MID = "MID",
-    HIGH = "HIGH"
-};
-export const RANKS_IN_ORDER = [RANKS.LOW, RANKS.MID, RANKS.HIGH];
-export const SENDING_ERRORS = [
-    "Blockhash not found",
-    "Node is behind by"
-]
+export const TOKEN_ABI_PATH = "tokenABI.json";
+export const WALLET_PATH = "wallets.txt";
+export const POOL_ABI_PATH = "poolABI.json";
+export const VISTA_ABI_PATH = "vistaABI.json"
+export const VISTA_CA = "0xEAaa41cB2a64B11FE761D41E747c032CdD60CaCE"
+
+export const WETH = getAddress("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+export const ROUTER_CA = getAddress("0xEad811D798020c635cf8dD4ddF31bDC5595B09F3");
+
+export const GAS_LIMIT_APPROVE = 70000;
+export const GAS_LIMIT_SWAP = 270000;
+
+export const eventABI = parseAbiItem('event Swap(address indexed sender,uint amount0In,uint amount1In,uint amount0Out,uint amount1Out,address indexed to)');
+export const fromBlock = 0;
+export const toBlock = 'latest';
+export const MIN_LATEST_TX_AMOUNT = 30;
+export const ETHPRICE = 2566
